@@ -85,7 +85,7 @@ export function toQueueItem(serverItem: any, previous?: QueueItem): QueueItem {
     retryCount:              serverItem.retry_count                     ?? previous?.retryCount        ?? 0,
     failureCode:             serverItem.failure_code                    ?? previous?.failureCode       ?? "",
     downloadEngine:          serverItem.download_engine === "aria2"     ? "aria2"                     : previous?.downloadEngine    ?? "standard",
-    requestedEngine:         serverItem.download_engine_requested === "aria2" ? "aria2"               : previous?.requestedEngine   ?? "standard",
+    requestedEngine:         serverItem.requested_engine === "aria2" ? "aria2"                        : previous?.requestedEngine   ?? "standard",
     engineNote:              serverItem.engine_note                     ?? previous?.engineNote        ?? "",
     bytesDownloaded:         Number(serverItem.bytes_downloaded         ?? previous?.bytesDownloaded   ?? 0),
     bytesTotal:              Number(serverItem.bytes_total              ?? previous?.bytesTotal        ?? 0),

@@ -285,6 +285,11 @@ export function useDownloaderQueue() {
     try {
       const res = await backendFetch(`${API}/downloads/${item.serverId}/action?action=${action}`, { method: "POST" }, { sensitive: true });
       if (!res.ok) throw new Error(`Action failed with ${res.status}`);
+      // FIX Bug 4: when the user manually retries a failed task, the old
+      // polling interval was cleared when the task reached "failed". If SSE
+      // is down at this moment the retried task gets no status updates.
+      // Restart polling so the fallback channel covers the new attempt.
+      if (action === "retry") _pollTask(item.serverId);
     } catch {
       setQueue((prev) => prev.map((e) => e.id === item.id ? item : e));
     }

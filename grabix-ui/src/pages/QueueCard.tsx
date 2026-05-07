@@ -61,8 +61,8 @@ export function QueueCard({
       {/* Row 1: thumbnail + title + action buttons */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <img
-          src={item.thumbnail || "https://via.placeholder.com/96x64?text=DL"}
-          onError={(e) => { (e.target as HTMLImageElement).src = "https://via.placeholder.com/96x64?text=DL"; }}
+          src={item.thumbnail || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='64' viewBox='0 0 96 64'%3E%3Crect width='96' height='64' fill='%23222'/%3E%3Ctext x='48' y='36' font-size='10' fill='%23666' text-anchor='middle' font-family='sans-serif'%3EDL%3C/text%3E%3C/svg%3E"}
+          onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='64' viewBox='0 0 96 64'%3E%3Crect width='96' height='64' fill='%23222'/%3E%3Ctext x='48' y='36' font-size='10' fill='%23666' text-anchor='middle' font-family='sans-serif'%3EDL%3C/text%3E%3C/svg%3E"; }}
           alt=""
           style={{ width: 48, height: 32, objectFit: "cover", borderRadius: 5, flexShrink: 0, border: "1px solid var(--border)", background: "var(--bg-surface2)" }}
         />

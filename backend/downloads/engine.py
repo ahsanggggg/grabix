@@ -342,6 +342,16 @@ def _persist_download_record(dl_id: str, force: bool = False) -> None:
             "error": item.get("error", ""),
             "tags": item.get("tags_csv", ""),
             "category": item.get("category", ""),
+            # FIX Bug 2: persist these so they survive app restarts correctly.
+            # Without them, INSERT OR REPLACE resets retry_count to 0 on every
+            # save -- the 3-attempt auto-retry limit could be exceeded across
+            # restarts. quality/download_engine are needed so recovered jobs
+            # re-download at the user's original settings, not the defaults.
+            "retry_count": int(item.get("retry_count", 0) or 0),
+            "failure_code": item.get("failure_code", ""),
+            "quality": item.get("quality", "best"),
+            "download_engine": item.get("download_engine", "standard"),
+            "size": item.get("size", ""),
         })
     except Exception as exc:
         logger.debug("_persist_download_record failed for %s: %s", dl_id, exc)
@@ -568,7 +578,8 @@ def _download_worker(dl_id: str) -> None:
                       can_pause=False,
                       progress_mode="determinate",
                       stage_label="Complete",
-                      file_path=file_path)
+                      file_path=file_path,
+                      partial_file_path="")  # FIX Bug 3: clear stale temp filename
 
         except _CancelledError:
             _mark("canceled", speed="", eta="", can_pause=False, stage_label="Canceled")
@@ -693,7 +704,7 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             raise _CancelledError()
 
         if status == "downloading":
-            # RC5 throttle: skip updates that arrive less than 2 seconds after
+            # RC5 throttle: skip updates that arrive less than 1 second after
             # the last one for this download. "finished" and other status values
             # always pass through so state transitions are never dropped.
             _now = time.monotonic()

@@ -187,14 +187,31 @@ def db_update_status(dl_id: str, status: str, file_path: str = "") -> None:
 
 
 def db_upsert_download_job(job: dict) -> None:
+    # FIX Bug 2 (part 2): the previous INSERT listed "tags" and "category"
+    # columns that do not exist in the download_jobs schema -- every call was
+    # silently failing with "no such column: tags". Those values are now stored
+    # inside params_json. retry_count, failure_code, and size are written to
+    # their actual schema columns so they survive restarts correctly.
     try:
+        import json as _json
+        params: dict = {}
+        try:
+            params = _json.loads(job.get("params_json") or "{}")
+        except Exception:
+            params = {}
+        # Pack extra metadata into params_json so the schema stays stable.
+        for key in ("quality", "download_engine", "tags", "category"):
+            if key in job and job[key] not in (None, ""):
+                params[key] = job[key]
+
         con = get_db_connection()
         con.execute(
             """
             INSERT OR REPLACE INTO download_jobs
-            (id, url, title, thumbnail, dl_type, status, progress, eta,
-             speed, file_path, created_at, error, tags, category)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, url, title, thumbnail, dl_type, status, percent, eta,
+             speed, file_path, created_at, error, size, retry_count,
+             failure_code, params_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job["id"],
@@ -209,8 +226,10 @@ def db_upsert_download_job(job: dict) -> None:
                 job.get("file_path", ""),
                 job.get("created_at", ""),
                 job.get("error", ""),
-                job.get("tags", ""),
-                job.get("category", ""),
+                job.get("size", ""),
+                int(job.get("retry_count", 0) or 0),
+                job.get("failure_code", ""),
+                _json.dumps(params),
             ),
         )
         con.commit()
@@ -238,10 +257,24 @@ def db_delete_download_job(job_id: str) -> None:
 
 
 def db_list_download_jobs() -> list[dict]:
+    # FIX Bug 2 (part 2): unpack quality, download_engine, tags, category
+    # from params_json so recover_download_jobs sees them as top-level keys.
     try:
+        import json as _json
         con = get_db_connection()
         rows = con.execute("SELECT * FROM download_jobs ORDER BY created_at DESC").fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            row = dict(r)
+            try:
+                params = _json.loads(row.get("params_json") or "{}")
+            except Exception:
+                params = {}
+            for key in ("quality", "download_engine", "tags", "category"):
+                if key not in row or not row[key]:
+                    row[key] = params.get(key, "")
+            result.append(row)
+        return result
     except Exception as e:
         log_event(
             backend_logger, logging.ERROR,
