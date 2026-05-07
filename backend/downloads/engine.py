@@ -802,10 +802,18 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             _download_controls[dl_id]["ydl_ref"] = ydl
         info = ydl.extract_info(item["url"], download=True)
         if info:
-            # Try to get final file path
-            final_path = info.get("requested_downloads", [{}])[0].get("filepath", "")
-            if not final_path:
-                final_path = ydl.prepare_filename(info)
+            # _postprocessor_hook may have already set file_path to the correct
+            # final output (e.g. .mp3 after FFmpegExtractAudio). Trust it if the
+            # file actually exists on disk — only fall back to requested_downloads
+            # if the hook path is absent or stale.
+            hook_path = _downloads[dl_id].get("file_path", "")
+            if hook_path and Path(hook_path).exists():
+                final_path = hook_path
+            else:
+                # Try to get final file path
+                final_path = info.get("requested_downloads", [{}])[0].get("filepath", "")
+                if not final_path:
+                    final_path = ydl.prepare_filename(info)
             if final_path:
                 _downloads[dl_id]["file_path"] = final_path
                 # FIX: yt-dlp downloads video and audio as separate streams for
@@ -871,7 +879,7 @@ def _run_aria2(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
     _download_controls[dl_id]["process_kind"] = "aria2"
 
     _re_progress = re.compile(
-        r"\[#[0-9a-f]+ (\S+)/(\S+)\((\d+)%\) CN:(\d+) DL:(\S+)"
+        r"\[#[0-9a-f]+ (\S+)/(\S+)\((\d+)%\) CN:(\d+) DL:(\S+?)(?:\s+ETA:(\S+))?"
     )
 
     for line in (proc.stdout or []):
@@ -880,13 +888,14 @@ def _run_aria2(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             raise _CancelledError()
         m = _re_progress.search(line)
         if m:
-            downloaded_str, total_str, pct, conns, speed_str = m.groups()
+            downloaded_str, total_str, pct, conns, speed_str, eta_str = m.groups()
             pct_f = float(pct)
             _downloads[dl_id].update({
                 "percent": pct_f,
                 "downloaded": downloaded_str,
                 "total": total_str,
                 "speed": speed_str + "/s",
+                "eta": eta_str or "",
                 "progress_mode": "determinate",
                 "stage_label": f"Downloading (aria2 ×{conns})",
                 "aria2_connection_segments": [{"connections": int(conns)}],
@@ -1231,13 +1240,13 @@ def get_runtime_dependencies() -> dict:
             pass
     deps["yt-dlp"] = {"id": "yt-dlp", "label": "yt-dlp", "available": ytdlp_ok, "job": None}
 
-    # ffmpeg
-    ffmpeg_ok = bool(shutil.which("ffmpeg"))
-    deps["ffmpeg"] = {"id": "ffmpeg", "label": "FFmpeg", "available": ffmpeg_ok, "job": None}
+    # ffmpeg — use same resolution as actual downloads so bundled tools register as available
+    ffmpeg_path = _resolve_tool_binary("ffmpeg", ["ffmpeg.exe", "ffmpeg"])
+    deps["ffmpeg"] = {"id": "ffmpeg", "label": "FFmpeg", "available": bool(ffmpeg_path), "path": ffmpeg_path or "", "job": None}
 
-    # aria2
-    aria2_ok = bool(shutil.which("aria2c"))
-    deps["aria2"] = {"id": "aria2", "label": "aria2c", "available": aria2_ok, "job": None}
+    # aria2 — use same resolution as actual downloads so bundled tools register as available
+    aria2_path = _resolve_tool_binary("aria2", ["aria2c.exe", "aria2c"])
+    deps["aria2"] = {"id": "aria2", "label": "aria2c", "available": bool(aria2_path), "path": aria2_path or "", "job": None}
 
     return {"dependencies": deps}
 

@@ -143,9 +143,7 @@ echo  [2/5]  Updating Python packages in bundled runtime...
 echo.
 
 "%PYTHON_EXE%" -m pip install --quiet --no-warn-script-location ^
-    -r "%BACKEND%\requirements.txt" ^
-    python-multipart ^
-    psutil
+    -r "%BACKEND%\requirements.txt"
 
 if errorlevel 1 (
     echo.

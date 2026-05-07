@@ -38,7 +38,8 @@
       "consumet-staging/**/*",
       "generated/**/*",
       "tools/**/*",
-      "backend-compiled/**/*"
+      "backend-compiled/**/*",
+      "python-runtime/**/*"
     ],
     "icon": [
       "icons/32x32.png",

@@ -6,3 +6,5 @@ httpx
 bcrypt
 cinemagoer
 curl_cffi
+psutil
+python-multipart

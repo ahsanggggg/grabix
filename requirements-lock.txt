@@ -19,3 +19,4 @@ h11==0.14.0
 httptools==0.6.4
 websockets==14.1
 python-multipart==0.0.20
+psutil==6.1.0

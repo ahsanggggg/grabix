@@ -529,6 +529,13 @@ def init_db() -> None:
             ("download_jobs", "download_strategy", "TEXT DEFAULT ''"),
             ("download_jobs", "params_json",       "TEXT DEFAULT '{}'"),
             ("download_jobs", "partial_file_path", "TEXT DEFAULT ''"),
+            # FIX Bug D: history table is missing columns that db_insert tries to
+            # write. Every db_insert call was silently failing with "no such column:
+            # tags", swallowed by except Exception — Watch History stored nothing.
+            # These three migrations make the schema match what db_insert writes.
+            ("history", "tags",      "TEXT DEFAULT ''"),
+            ("history", "category",  "TEXT DEFAULT ''"),
+            ("history", "file_size", "INTEGER DEFAULT 0"),
         ]
         for table, col, col_def in _migration_columns:
             try:
