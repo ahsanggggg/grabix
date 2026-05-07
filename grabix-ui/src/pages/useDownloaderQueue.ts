@@ -30,6 +30,10 @@ export interface StartDownloadParams {
 export function useDownloaderQueue() {
   const [queue, setQueue] = useState<QueueItem[]>(() => loadStoredQueue());
   const pollingRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  // FIX 6: track whether SSE is currently delivering updates. When healthy,
+  // per-task polling is skipped — SSE already covers it every 250 ms.
+  // Polling only activates as a fallback when SSE drops.
+  const sseHealthyRef = useRef(false);
 
   // ── SSE sync ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -52,17 +56,9 @@ export function useDownloaderQueue() {
       });
     };
 
-    // FIX (downloads stuck "Queued"): SSE onerror previously fetched once and
-    // never reconnected. Any hiccup in the packaged app — WebView2 buffering,
-    // Python startup latency, OS network quirks — would permanently kill live
-    // updates. Now we: (1) close the dead connection, (2) do one fallback REST
-    // fetch, then (3) schedule a full SSE reconnect. This loop runs indefinitely
-    // while the component is mounted, matching the resilience expected of a
-    // desktop app that may stay open for hours.
     const connectSSE = () => {
       if (!active) return;
 
-      // Close any lingering connection before opening a new one.
       if (es) {
         try { es.close(); } catch { /* ignore */ }
         es = null;
@@ -71,24 +67,24 @@ export function useDownloaderQueue() {
       es = new EventSource(`${API}/downloads/stream?_t=${Date.now()}`);
 
       es.onmessage = (e) => {
+        // FIX 6: mark SSE as healthy on first real message so polling backs off.
+        sseHealthyRef.current = true;
         try { applyServerData(JSON.parse(e.data) as any[]); } catch { /* ignore malformed frames */ }
       };
 
       es.onerror = () => {
-        // Close the broken connection immediately.
+        // FIX 6: SSE dropped — enable fallback polling for active tasks.
+        sseHealthyRef.current = false;
         try { es?.close(); } catch { /* ignore */ }
         es = null;
 
         if (!active) return;
 
-        // 1. Fetch current state right away so the UI doesn't go stale.
-        // FIX: use backendFetch so the auth header is sent in release EXE mode.
         void backendFetch(`${API}/downloads?_t=${Date.now()}`, undefined, { sensitive: true })
           .then((r) => r.ok ? r.json() : null)
           .then((data) => { if (data && active) applyServerData(data as any[]); })
           .catch(() => undefined);
 
-        // 2. Reconnect the SSE stream after a short back-off (3 s).
         if (reconnectTimer) clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
@@ -101,6 +97,7 @@ export function useDownloaderQueue() {
 
     return () => {
       active = false;
+      sseHealthyRef.current = false;
       try { es?.close(); } catch { /* ignore */ }
       if (reconnectTimer) clearTimeout(reconnectTimer);
       pollingRef.current.forEach((t) => clearInterval(t));
@@ -112,29 +109,27 @@ export function useDownloaderQueue() {
   useEffect(() => { storeQueueSnapshot(queue); }, [queue]);
 
   // ── Per-task polling helper ───────────────────────────────────────────────────
+  // FIX 6: polling is the SSE fallback, not the primary channel. Only starts
+  // a polling interval when SSE is unhealthy. When SSE recovers, new _pollTask
+  // calls will no-op and the SSE stream takes over.
   function _pollTask(serverTaskId: string) {
-    // FIX (downloads stuck "Queued"): previously `catch { clearInterval(interval) }`
-    // meant a single transient network error would permanently stop polling for
-    // that task. Now we allow up to MAX_CONSECUTIVE_ERRORS failures before giving
-    // up, so short backend hiccups (PyO3 GIL pause, yt-dlp startup, etc.) are
-    // transparent to the user.
+    if (sseHealthyRef.current) return; // SSE is covering it — no need to poll
+
     const MAX_CONSECUTIVE_ERRORS = 8;
     let consecutiveErrors = 0;
 
     const interval = setInterval(async () => {
+      // Stop polling if SSE has since recovered.
+      if (sseHealthyRef.current) {
+        clearInterval(interval);
+        pollingRef.current.delete(serverTaskId);
+        return;
+      }
       try {
-        // Add a cache-busting timestamp so WebView2's HTTP cache never returns
-        // a stale "queued" response. Without this, Chromium embedded in Tauri
-        // caches the first GET response and _pollTask sees "queued" forever.
-        // FIX: use backendFetch (not plain fetch) so the X-Grabix-Desktop-Auth
-        // header is included. In a release EXE desktop auth is required; plain
-        // fetch() has no auth header → every poll returns 401 → after
-        // MAX_CONSECUTIVE_ERRORS the polling stops and the item stays
-        // "Queued" forever. backendFetch attaches the token transparently.
         const pr  = await backendFetch(`${API}/download-status/${serverTaskId}?_t=${Date.now()}`, undefined, { sensitive: true });
         if (!pr.ok) throw new Error(`status ${pr.status}`);
         const pd  = await pr.json();
-        consecutiveErrors = 0; // reset on success
+        consecutiveErrors = 0;
 
         const isDone = ["done", "failed", "canceled", "error"].includes(pd.status);
         setQueue((prev) =>
@@ -166,11 +161,9 @@ export function useDownloaderQueue() {
       } catch {
         consecutiveErrors++;
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          // Backend unreachable for too long — stop polling to avoid spam.
           clearInterval(interval);
           pollingRef.current.delete(serverTaskId);
         }
-        // Otherwise swallow the error and try again next tick.
       }
     }, 1000);
     pollingRef.current.set(serverTaskId, interval);
@@ -238,7 +231,13 @@ export function useDownloaderQueue() {
       try {
         const forceHls = bUrl.toLowerCase().includes(".m3u8");
         p.onDownloadStarting?.();
-        const qs = `url=${encodeURIComponent(bUrl)}&dl_type=${p.fileType}&quality=${p.quality}&audio_format=${p.audioFormat}&subtitle_lang=${p.subtitleLang}&thumbnail_format=${p.thumbnailFormat}&trim_start=${p.trimStart}&trim_end=${p.trimEnd}&trim_enabled=${p.trimOpen}&use_cpu=${p.useCpu}&download_engine=${encodeURIComponent(effectiveEngine)}${forceHls ? "&force_hls=true" : ""}`;
+        // FIX 10: batch has no VideoInfo, so we can't compute the real trimEnabled
+        // check (trimOpen && trimEnd - trimStart < duration). Sending p.trimOpen
+        // raw was silently wrong — trim would fire on every batch URL regardless
+        // of whether the trim range made sense for that media's actual duration.
+        // Safest fix: always disable trim in batch mode. Users who need trimmed
+        // downloads should queue them individually via startDownload.
+        const qs = `url=${encodeURIComponent(bUrl)}&dl_type=${p.fileType}&quality=${p.quality}&audio_format=${p.audioFormat}&subtitle_lang=${p.subtitleLang}&thumbnail_format=${p.thumbnailFormat}&trim_start=${p.trimStart}&trim_end=${p.trimEnd}&trim_enabled=false&use_cpu=${p.useCpu}&download_engine=${encodeURIComponent(effectiveEngine)}${forceHls ? "&force_hls=true" : ""}`;
         const res = await backendFetch(`${API}/download?${qs}`, undefined, { sensitive: true });
         if (!res.ok) throw new Error(`Download request failed with ${res.status}`);
         const data = await res.json();

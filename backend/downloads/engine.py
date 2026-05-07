@@ -45,6 +45,13 @@ logger = logging.getLogger("grabix.downloads")  # same name get_logger uses
 _downloads: dict[str, dict] = {}
 _download_controls: dict[str, dict] = {}
 
+# ── Concurrency limit ─────────────────────────────────────────────────────────
+# Caps simultaneous active downloads at 3. Threads beyond this limit wait in
+# the semaphore queue instead of all hammering the network at once.
+# Change MAX_CONCURRENT to taste (e.g. 5 for fast connections).
+MAX_CONCURRENT = 3
+_download_semaphore = threading.Semaphore(MAX_CONCURRENT)
+
 # ── Lazy imports (avoid circular imports at module load time) ─────────────────
 _db_update_status = None
 _db_upsert_download_job = None
@@ -499,6 +506,17 @@ def _download_worker(dl_id: str) -> None:
     pause_ev: threading.Event = ctrl.get("pause", threading.Event())
     cancel_ev: threading.Event = ctrl.get("cancel", threading.Event())
 
+    # FIX 5: Wait for a slot in the concurrency pool before doing any real work.
+    # If cancelled while waiting in the queue, bail out immediately.
+    if dl_id in _downloads:
+        _downloads[dl_id].update({"stage_label": "Queued (waiting…)", "status": "queued"})
+    _download_semaphore.acquire()
+    if cancel_ev.is_set():
+        _download_semaphore.release()
+        if dl_id in _downloads:
+            _downloads[dl_id].update({"status": "canceled", "stage_label": "Canceled", "can_pause": False})
+        return
+
     def _mark(status: str, **kwargs):
         if dl_id in _downloads:
             _downloads[dl_id].update({"status": status, **kwargs})
@@ -523,68 +541,73 @@ def _download_worker(dl_id: str) -> None:
         if cancel_ev.is_set():
             raise _CancelledError()
 
-    _mark("downloading", stage_label="Starting…", can_pause=True, progress_mode="activity")
-
     try:
-        engine = item.get("download_engine", "standard")
-        dl_type = item.get("dl_type", "video")
+        _mark("downloading", stage_label="Starting…", can_pause=True, progress_mode="activity")
 
-        if engine == "aria2" and _has_aria2 and _has_aria2():
-            _run_aria2(dl_id, item, pause_ev, cancel_ev)
-        elif dl_type == "subtitle" or _is_direct_subtitle_url(item.get("url", "")):
-            _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="subtitle")
-        elif _is_direct_media_url(item.get("url", "")) and item.get("force_hls") is False:
-            _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="media")
-        elif dl_type == "thumbnail":
-            _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="image")
-        else:
-            _run_ytdlp(dl_id, item, pause_ev, cancel_ev)
-
-        if not cancel_ev.is_set():
-            file_path = _downloads[dl_id].get("file_path", "")
-            _mark("done",
-                  percent=100.0,
-                  speed="",
-                  eta="",
-                  can_pause=False,
-                  progress_mode="determinate",
-                  stage_label="Complete",
-                  file_path=file_path)
-
-    except _CancelledError:
-        _mark("canceled", speed="", eta="", can_pause=False, stage_label="Canceled")
-    except Exception as exc:
-        logger.warning("Download %s failed: %s", dl_id, exc, exc_info=False)
-        partial = _downloads.get(dl_id, {}).get("partial_file_path", "")
-        _mark("failed",
-              error=str(exc)[:300],
-              speed="",
-              eta="",
-              can_pause=False,
-              recoverable=bool(partial),
-              failure_code="download_failed",
-              stage_label="Failed")
-    except BaseException as exc:
-        # FIX (downloads stuck "Queued" in EXE — root cause #3):
-        # yt_dlp and the frozen importer can raise SystemExit or other
-        # BaseException subclasses (not just Exception). In dev mode these
-        # propagate up and are visible. In the frozen EXE the background thread
-        # silently dies, the status dict is never updated from "downloading"
-        # back to "failed", and the UI shows "Queued" forever.
-        # Catching BaseException here guarantees _mark("failed") always runs.
-        logger.error("Download %s crashed with BaseException: %s", dl_id, exc, exc_info=True)
         try:
+            engine = item.get("download_engine", "standard")
+            dl_type = item.get("dl_type", "video")
+
+            if engine == "aria2" and _has_aria2 and _has_aria2():
+                _run_aria2(dl_id, item, pause_ev, cancel_ev)
+            elif dl_type == "subtitle" or _is_direct_subtitle_url(item.get("url", "")):
+                _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="subtitle")
+            elif _is_direct_media_url(item.get("url", "")) and item.get("force_hls") is False:
+                _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="media")
+            elif dl_type == "thumbnail":
+                _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="image")
+            else:
+                _run_ytdlp(dl_id, item, pause_ev, cancel_ev)
+
+            if not cancel_ev.is_set():
+                file_path = _downloads[dl_id].get("file_path", "")
+                _mark("done",
+                      percent=100.0,
+                      speed="",
+                      eta="",
+                      can_pause=False,
+                      progress_mode="determinate",
+                      stage_label="Complete",
+                      file_path=file_path)
+
+        except _CancelledError:
+            _mark("canceled", speed="", eta="", can_pause=False, stage_label="Canceled")
+        except Exception as exc:
+            logger.warning("Download %s failed: %s", dl_id, exc, exc_info=False)
+            partial = _downloads.get(dl_id, {}).get("partial_file_path", "")
             _mark("failed",
-                  error=f"Internal error: {type(exc).__name__}: {exc}"[:300],
+                  error=str(exc)[:300],
                   speed="",
                   eta="",
                   can_pause=False,
-                  recoverable=False,
-                  failure_code="internal_crash",
+                  recoverable=bool(partial),
+                  failure_code="download_failed",
                   stage_label="Failed")
-        except Exception:
-            pass
-        raise  # re-raise so the thread's unhandled-exception handler still logs it
+        except BaseException as exc:
+            # FIX (downloads stuck "Queued" in EXE — root cause #3):
+            # yt_dlp and the frozen importer can raise SystemExit or other
+            # BaseException subclasses (not just Exception). In dev mode these
+            # propagate up and are visible. In the frozen EXE the background thread
+            # silently dies, the status dict is never updated from "downloading"
+            # back to "failed", and the UI shows "Queued" forever.
+            # Catching BaseException here guarantees _mark("failed") always runs.
+            logger.error("Download %s crashed with BaseException: %s", dl_id, exc, exc_info=True)
+            try:
+                _mark("failed",
+                      error=f"Internal error: {type(exc).__name__}: {exc}"[:300],
+                      speed="",
+                      eta="",
+                      can_pause=False,
+                      recoverable=False,
+                      failure_code="internal_crash",
+                      stage_label="Failed")
+            except Exception:
+                pass
+            raise  # re-raise so the thread's unhandled-exception handler still logs it
+
+    finally:
+        # FIX 5: Always release the concurrency slot, even on crash or cancel.
+        _download_semaphore.release()
 
 
 class _CancelledError(Exception):
@@ -640,25 +663,19 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             "preferredcodec": audio_fmt,
             "preferredquality": str(audio_quality),
         })
-    if trim_enabled and trim_end > trim_start:
-        postprocessors.append({
-            "key": "FFmpegVideoRemuxer",
-            "preferedformat": "mp4",
-        })
+    # NOTE: trim is handled by external_downloader_args (ffmpeg -ss/-to) below.
+    # FFmpegVideoRemuxer was previously added here but it does NOT trim — it only
+    # remuxes the container. Keeping it conflicted with the external_downloader path
+    # and caused the full video to download with no cut applied.
 
-    ffmpeg_path = _resolve_tool_binary("ffmpeg", ["ffmpeg.exe", "ffmpeg"])
-
-    # FIX (RC5): Throttle state dict for the progress hook.
-    # Without this, yt-dlp fires the hook every ~0.5 seconds per download.
-    # With 2-3 concurrent downloads that's 4-6 GIL acquisitions per second,
-    # which starves the uvicorn async event loop and causes /health/ping to
-    # time out — making the watchdog falsely show "backend offline".
-    # Throttling to once every 2 seconds per download reduces GIL contention
-    # by ~4x with no meaningful loss of progress visibility.
-    _last_progress_update: dict[str, float] = {}
+    # FIX (RC5): Throttle to once per second. Using a plain float (nonlocal)
+    # instead of a single-key dict — the dict always had exactly one entry,
+    # so the dict was just unnecessary overhead.
+    _last_progress_time: float = 0.0
 
     # ── Progress hook ─────────────────────────────────────────────────────────
     def _progress_hook(d: dict) -> None:
+        nonlocal _last_progress_time
         status = d.get("status")
 
         if cancel_ev.is_set():
@@ -680,9 +697,9 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             # the last one for this download. "finished" and other status values
             # always pass through so state transitions are never dropped.
             _now = time.monotonic()
-            if _now - _last_progress_update.get(dl_id, 0.0) < 1.0:
+            if _now - _last_progress_time < 1.0:
                 return
-            _last_progress_update[dl_id] = _now
+            _last_progress_time = _now
 
             downloaded = int(d.get("downloaded_bytes") or 0)
             total = int(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
@@ -868,10 +885,12 @@ def _run_aria2(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
     if proc.returncode != 0 and not cancel_ev.is_set():
         raise RuntimeError(f"aria2c exited with code {proc.returncode}")
 
-    # Rename tmp file to final
+    # Rename tmp file to final — preserve the original file extension from the URL
+    from urllib.parse import urlparse as _urlparse
     tmp = dl_dir / f"{title}.aria2tmp"
     if tmp.exists():
-        final = dl_dir / title
+        url_ext = Path(_urlparse(url).path).suffix  # e.g. ".mp4", ".mkv"
+        final = dl_dir / (title + url_ext)
         tmp.rename(final)
         _downloads[dl_id]["file_path"] = str(final)
 
@@ -904,7 +923,7 @@ def _run_direct_download(
     })
 
     _downloads[dl_id].update({
-        "can_pause": False,
+        "can_pause": True,  # FIX 4: pause loop is active — expose the button
         "progress_mode": "activity",
         "stage_label": "Downloading…",
     })
@@ -918,6 +937,13 @@ def _run_direct_download(
             while True:
                 if cancel_ev.is_set():
                     raise _CancelledError()
+                # FIX 4: honour pause. Block here until resumed or cancelled.
+                while pause_ev.is_set():
+                    if cancel_ev.is_set():
+                        raise _CancelledError()
+                    _downloads[dl_id]["status"] = "paused"
+                    _downloads[dl_id]["stage_label"] = "Paused"
+                    time.sleep(0.3)
                 chunk = resp.read(CHUNK)
                 if not chunk:
                     break
@@ -1076,6 +1102,7 @@ def download_action(dl_id: str, action: str) -> dict:
             "failure_code": "",
             "stage_label": "Queued",
             "progress_mode": "activity",
+            "_failed_at": 0,  # FIX: clear stale timestamp so auto-retry doesn't re-fire immediately
         })
         if _db_update_status:
             _db_update_status(dl_id, "queued")

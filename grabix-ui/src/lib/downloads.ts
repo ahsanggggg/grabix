@@ -10,6 +10,7 @@ export interface DownloadQueueRequest {
   category?: string;
   tags?: string[];
   downloadEngine?: "standard" | "aria2";
+  quality?: string;
 }
 
 export interface SubtitleDownloadRequest {
@@ -136,6 +137,7 @@ export async function queueVideoDownload(request: DownloadQueueRequest): Promise
       title: request.title?.trim() || "",
       thumbnail: request.thumbnail?.trim() || "",
       dl_type: "video",
+      quality: request.quality?.trim() || "best",
       headers_json:
         request.headers && Object.keys(request.headers).length > 0
           ? JSON.stringify(request.headers)
