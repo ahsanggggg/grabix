@@ -46,26 +46,28 @@ export function usePlayerControls({
   const previewHoveringRef = useRef(false);
 
   // State-mirror refs (avoid stale closures in callbacks)
-  const isPlayingRef       = useRef(isPlaying);
-  const errorTextRef       = useRef(errorText);
-  const settingsOpenRef    = useRef(settingsOpen);
-  const episodeMenuOpenRef = useRef(episodeMenuOpen);
+  const isPlayingRef         = useRef(isPlaying);
+  const errorTextRef         = useRef(errorText);
+  const settingsOpenRef      = useRef(settingsOpen);
+  const episodeMenuOpenRef   = useRef(episodeMenuOpen);
+  const showSubtitlePanelRef = useRef(showSubtitlePanel);
 
   const [showChrome, setShowChrome]   = useState(true);
   const [, setIsFullscreen]           = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{ x: number; time: number; dataUrl: string; visible: boolean } | null>(null);
 
   // Keep mirror refs fresh
-  useEffect(() => { isPlayingRef.current = isPlaying; },         [isPlaying]);
-  useEffect(() => { errorTextRef.current = errorText; },         [errorText]);
-  useEffect(() => { settingsOpenRef.current = settingsOpen; },   [settingsOpen]);
-  useEffect(() => { episodeMenuOpenRef.current = episodeMenuOpen; }, [episodeMenuOpen]);
+  useEffect(() => { isPlayingRef.current = isPlaying; },                 [isPlaying]);
+  useEffect(() => { errorTextRef.current = errorText; },                 [errorText]);
+  useEffect(() => { settingsOpenRef.current = settingsOpen; },           [settingsOpen]);
+  useEffect(() => { episodeMenuOpenRef.current = episodeMenuOpen; },     [episodeMenuOpen]);
+  useEffect(() => { showSubtitlePanelRef.current = showSubtitlePanel; }, [showSubtitlePanel]);
 
   // ── Chrome visibility ────────────────────────────────────────────────────────
   const showControls = useCallback(() => {
     setShowChrome(true);
     if (hideChromeTimeoutRef.current) window.clearTimeout(hideChromeTimeoutRef.current);
-    if (errorTextRef.current || settingsOpenRef.current || episodeMenuOpenRef.current) return;
+    if (errorTextRef.current || settingsOpenRef.current || episodeMenuOpenRef.current || showSubtitlePanelRef.current) return;
     hideChromeTimeoutRef.current = window.setTimeout(() => {
       if (isPlayingRef.current && !errorTextRef.current) setShowChrome(false);
     }, 3000);
@@ -83,11 +85,7 @@ export function usePlayerControls({
     }
   }, [isPlaying, errorText]);
 
-  useEffect(() => {
-    if (!fallbackNotice) return;
-    const t = window.setTimeout(() => {/* orchestrator owns setFallbackNotice */}, 4000);
-    return () => window.clearTimeout(t);
-  }, [fallbackNotice]);
+
 
   // Fullscreen listener
   useEffect(() => {

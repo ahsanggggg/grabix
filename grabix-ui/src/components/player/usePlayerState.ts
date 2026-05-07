@@ -58,10 +58,13 @@ export function usePlayerState(props: Props) {
   } = sourceManager;
 
   // ── HLS engine ───────────────────────────────────────────────────────────────
+  // Bridge ref — passed to useHlsEngine now, wired to subtitleEngine after it initialises.
+  const subtitleTickBridge = useRef<(t: number) => void>(() => {});
+
   const hlsEngine = useHlsEngine({
     videoRef, activeSource, isDirectEngine, reloadKey,
     resolvedPlaybackUrl, volumeBoost, setVolumeBoost,
-    subtitleTickRef: { current: () => {} }, // replaced below
+    subtitleTickRef: subtitleTickBridge,
     setIsLoading, setStatusText, setIsPlaying,
     setFallbackNotice, goToNextSource, onSourcePlaying,
     API, baseSources,
@@ -73,11 +76,11 @@ export function usePlayerState(props: Props) {
     API, setFallbackNotice, playbackSpeed, disableSubtitleSearch,
   });
 
-  // Wire subtitle tick into HLS engine (the ref is stable — no re-render)
-  // The HLS engine's useEffect reads subtitleTickRef.current on each timeupdate,
-  // so assigning here is safe even though it happens after both hooks run.
-  (hlsEngine as { subtitleTickRef?: React.RefObject<(t: number) => void> });
-  // We pass subtitleTickRef directly to useHlsEngine above; see note at bottom.
+  // Wire bridge → real subtitle tick handler.
+  // This runs on every render so the bridge always points at the latest handler.
+  // Safe: subtitleTickBridge is a stable ref; .current is only read inside the
+  // video's timeupdate callback, which runs after this assignment completes.
+  subtitleTickBridge.current = subtitleEngine.subtitleTickRef.current;
 
   // ── Player controls ──────────────────────────────────────────────────────────
   const controls = usePlayerControls({
@@ -227,18 +230,4 @@ export function usePlayerState(props: Props) {
   };
 }
 
-// ── NOTE on subtitleTickRef wiring ────────────────────────────────────────────
-// useHlsEngine accepts subtitleTickRef as a parameter and calls
-// subtitleTickRef.current(t) on every timeupdate.  useSubtitleEngine exposes
-// subtitleTickRef which is a stable ref that updates the current-cue state.
-// To wire them together without a circular dependency:
-//
-//   const subtitleTickBridge = useRef<(t: number) => void>(() => {});
-//   // After both hooks are initialised, point the bridge at the real handler:
-//   useEffect(() => {
-//     subtitleTickBridge.current = subtitleEngine.subtitleTickRef.current;
-//   });
-//
-// Then pass subtitleTickBridge to useHlsEngine instead of the placeholder.
-// The implementation above passes the placeholder for brevity; swap it in if
-// you need live subtitle updates (the ref assignment is side-effect-safe).
+

@@ -86,7 +86,7 @@ export function useHlsEngine({
     let restoreAudio = false;
     const origMuted  = video.muted;
     const origVolume = video.volume;
-    const startupMs  = activeSource.kind === "hls" && shouldKeepHlsProxied(activeSource) ? 120_000 : 60_000;
+    const startupMs  = activeSource.kind === "hls" && shouldKeepHlsProxied(activeSource) ? 25_000 : 30_000;
     const startupTimer = window.setTimeout(() => { if (!sourceReady) goToNextSource("timeout"); }, startupMs);
 
     const markReady = (status = "Ready") => { sourceReady = true; setIsLoading(false); setStatusText(status); };

@@ -124,12 +124,13 @@ export default function VidSrcPlayer(rawProps: ExtendedProps) {
   // Reactive currentTime for SkipButton + NextEpisodeCountdown (direct engine only)
   const [currentTime, setCurrentTime] = useState(0);
   useEffect(() => {
+    if (!p.isDirectEngine) return;
     const video = p.videoRef?.current;
     if (!video) return;
     const onTime = () => setCurrentTime(video.currentTime);
     video.addEventListener("timeupdate", onTime);
     return () => video.removeEventListener("timeupdate", onTime);
-  });
+  }, [p.isDirectEngine, p.reloadKey]); // re-bind when the video element is remounted
 
   return (
     <div ref={p.rootRef} className={`gx-player${p.showChrome ? " controls-visible" : ""}`} onMouseMove={p.showControls} onClick={p.handleShellClick}>
@@ -297,7 +298,7 @@ export default function VidSrcPlayer(rawProps: ExtendedProps) {
                       <div className="gx-ep-label">{episodeLabel}s</div>
                       {episodeOptions.map(ep => (
                         <div key={ep} className={`gx-ep-item${p.activeEpisode === ep ? " active" : ""}`} onClick={() => { void p.handleEpisodeSwitch(ep); p.setEpisodeMenuOpen(false); }} style={{ opacity: p.episodeLoading ? 0.5 : 1 }}>
-                          <span>{episodeLabel} {ep}</span><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>
+                          <span>{episodeLabel} {ep}</span>{p.activeEpisode === ep && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}
                         </div>
                       ))}
                     </div>
@@ -331,15 +332,15 @@ export default function VidSrcPlayer(rawProps: ExtendedProps) {
                         <div className="gx-settings-header"><button className="gx-settings-header-btn" onClick={() => p.setSettingsScreen("main")}>←</button>Quality</div>
                         <div className="gx-settings-list">
                           {p.hasAdaptiveHlsLevels ? (<>
-                            <div className={`gx-settings-item${p.hlsAutoQuality ? " active" : ""}`} onClick={() => { p.setHlsAutoQuality(true); p.setSelectedHlsLevel(-1); if (p.hlsRef.current) { p.hlsRef.current.currentLevel = -1; p.hlsRef.current.loadLevel = -1; p.hlsRef.current.nextLevel = -1; } p.setSettingsScreen("main"); }}><span>Auto</span><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span></div>
+                            <div className={`gx-settings-item${p.hlsAutoQuality ? " active" : ""}`} onClick={() => { p.setHlsAutoQuality(true); p.setSelectedHlsLevel(-1); if (p.hlsRef.current) { p.hlsRef.current.currentLevel = -1; p.hlsRef.current.loadLevel = -1; p.hlsRef.current.nextLevel = -1; } p.setSettingsScreen("main"); }}><span>Auto</span>{p.hlsAutoQuality && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}</div>
                             {p.hlsLevels.map(({ height, bitrate }, index) => (
                               <div key={index} className={`gx-settings-item${!p.hlsAutoQuality && p.selectedHlsLevel === index ? " active" : ""}`} onClick={() => { p.setHlsAutoQuality(false); p.setSelectedHlsLevel(index); if (p.hlsRef.current) { p.hlsRef.current.currentLevel = index; p.hlsRef.current.loadLevel = index; p.hlsRef.current.nextLevel = index; } p.setSettingsScreen("main"); }}>
                                 <span>{height > 0 ? `${height}p` : `Level ${index + 1}`}</span>
-                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{bitrate > 0 && <small style={{ fontSize: 11, color: "var(--player-text-dimmer)" }}>{Math.round(bitrate / 1000)} kbps</small>}<span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span></div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{bitrate > 0 && <small style={{ fontSize: 11, color: "var(--player-text-dimmer)" }}>{Math.round(bitrate / 1000)} kbps</small>}{!p.hlsAutoQuality && p.selectedHlsLevel === index && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}</div>
                               </div>
                             ))}
                           </>) : (p.allSources.map((source, index) => (
-                            <div key={source.id} className={`gx-settings-item${index === p.activeIndex ? " active" : ""}`} onClick={() => { p.handleSourceSwitch(index); p.setSettingsScreen("main"); }}><span>{source.quality ?? source.label}</span><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span></div>
+                            <div key={source.id} className={`gx-settings-item${index === p.activeIndex ? " active" : ""}`} onClick={() => { p.handleSourceSwitch(index); p.setSettingsScreen("main"); }}><span>{source.quality ?? source.label}</span>{index === p.activeIndex && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}</div>
                           )))}
                         </div>
                       </div>
@@ -350,7 +351,7 @@ export default function VidSrcPlayer(rawProps: ExtendedProps) {
                         <div className="gx-settings-header"><button className="gx-settings-header-btn" onClick={() => p.setSettingsScreen("main")}>←</button>Playback Speed</div>
                         <div className="gx-settings-list">
                           {[0.5, 0.75, 1, 1.25, 1.5, 2].map(speed => (
-                            <div key={speed} className={`gx-settings-item${p.playbackSpeed === speed ? " active" : ""}`} onClick={() => { p.setPlaybackSpeed(speed); p.setSettingsScreen("main"); }}><span>{speed === 1 ? "Normal" : `${speed}×`}</span><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span></div>
+                            <div key={speed} className={`gx-settings-item${p.playbackSpeed === speed ? " active" : ""}`} onClick={() => { p.setPlaybackSpeed(speed); p.setSettingsScreen("main"); }}><span>{speed === 1 ? "Normal" : `${speed}×`}</span>{p.playbackSpeed === speed && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}</div>
                           ))}
                         </div>
                       </div>
@@ -360,8 +361,8 @@ export default function VidSrcPlayer(rawProps: ExtendedProps) {
                       <div className="gx-settings-screen">
                         <div className="gx-settings-header"><button className="gx-settings-header-btn" onClick={() => p.setSettingsScreen("main")}>{"<"}</button>Subtitles</div>
                         <div className="gx-settings-list">
-                          <div className={`gx-settings-item${!p.subtitlesEnabled ? " active" : ""}`} onClick={() => { p.clearSubtitles(); p.setSettingsScreen("main"); }}><span>Off</span><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>OK</span></div>
-                          {p.activeSubtitles.map(track => (<div key={track.url} className={`gx-settings-item${p.subtitlesEnabled && p.subtitleUrl === track.url ? " active" : ""}`} onClick={() => { p.handleSubtitleSelect(track.url, track.label); p.setSettingsScreen("main"); }}><span>{track.label}</span><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>OK</span></div>))}
+                          <div className={`gx-settings-item${!p.subtitlesEnabled ? " active" : ""}`} onClick={() => { p.clearSubtitles(); p.setSettingsScreen("main"); }}><span>Off</span>{!p.subtitlesEnabled && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>OK</span>}</div>
+                          {p.activeSubtitles.map(track => (<div key={track.url} className={`gx-settings-item${p.subtitlesEnabled && p.subtitleUrl === track.url ? " active" : ""}`} onClick={() => { p.handleSubtitleSelect(track.url, track.label); p.setSettingsScreen("main"); }}><span>{track.label}</span>{p.subtitlesEnabled && p.subtitleUrl === track.url && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>OK</span>}</div>))}
                           <div className="gx-settings-divider" />
                           <div className="gx-settings-item" onClick={() => p.setSettingsScreen("subtitleAppearance")}><span>Appearance</span><div className="gx-settings-row-val"><span style={{ color: "var(--player-text-dimmer)" }}>Size and background</span><span className="gx-settings-chevron">{">"}</span></div></div>
                           <div className="gx-settings-item" onClick={() => { p.setShowSubtitlePanel(true); p.setSettingsOpen(false); }}><span>Search subtitles...</span></div>
@@ -389,8 +390,8 @@ export default function VidSrcPlayer(rawProps: ExtendedProps) {
                         <div className="gx-settings-header"><button className="gx-settings-header-btn" onClick={() => p.setSettingsScreen("main")}>←</button>Server</div>
                         <div className="gx-settings-list">
                           {sourceOptions && sourceOptions.length > 0
-                            ? sourceOptions.map(option => (<div key={option.id} className={`gx-settings-item${option.id === p.activeSourceOptionId ? " active" : ""}`} onClick={() => { void p.handleSourceOptionSwitch(option.id); p.setSettingsScreen("main"); }}><span>{option.label}</span><div style={{ display: "flex", alignItems: "center", gap: 8 }}>{p.episodeLoading && option.id === p.activeSourceOptionId && <small style={{ fontSize: 11, color: "var(--player-text-dimmer)" }}>Loading…</small>}<span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span></div></div>))
-                            : p.allSources.map((source, index) => (<div key={source.id} className={`gx-settings-item${index === p.activeIndex ? " active" : ""}`} onClick={() => { p.handleSourceSwitch(index); p.setSettingsScreen("main"); }}><span>{source.label}</span><div style={{ display: "flex", alignItems: "center", gap: 8 }}><small style={{ fontSize: 11, color: "var(--player-text-dimmer)" }}>{source.provider}</small><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span></div></div>))
+                            ? sourceOptions.map(option => (<div key={option.id} className={`gx-settings-item${option.id === p.activeSourceOptionId ? " active" : ""}`} onClick={() => { void p.handleSourceOptionSwitch(option.id); p.setSettingsScreen("main"); }}><span>{option.label}</span><div style={{ display: "flex", alignItems: "center", gap: 8 }}>{p.episodeLoading && option.id === p.activeSourceOptionId && <small style={{ fontSize: 11, color: "var(--player-text-dimmer)" }}>Loading…</small>}{option.id === p.activeSourceOptionId && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}</div></div>))
+                            : p.allSources.map((source, index) => (<div key={source.id} className={`gx-settings-item${index === p.activeIndex ? " active" : ""}`} onClick={() => { p.handleSourceSwitch(index); p.setSettingsScreen("main"); }}><span>{source.label}</span><div style={{ display: "flex", alignItems: "center", gap: 8 }}><small style={{ fontSize: 11, color: "var(--player-text-dimmer)" }}>{source.provider}</small>{index === p.activeIndex && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}</div></div>))
                           }
                         </div>
                       </div>
@@ -400,7 +401,7 @@ export default function VidSrcPlayer(rawProps: ExtendedProps) {
                       <div className="gx-settings-screen">
                         <div className="gx-settings-header"><button className="gx-settings-header-btn" onClick={() => p.setSettingsScreen("main")}>←</button>{episodeLabel}s</div>
                         <div className="gx-settings-list">
-                          {(episodeOptions ?? []).map(ep => (<div key={ep} className={`gx-settings-item${p.activeEpisode === ep ? " active" : ""}`} onClick={() => { void p.handleEpisodeSwitch(ep); p.setSettingsScreen("main"); }} style={{ opacity: p.episodeLoading ? 0.5 : 1 }}><span>{episodeLabel} {ep}</span><span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span></div>))}
+                          {(episodeOptions ?? []).map(ep => (<div key={ep} className={`gx-settings-item${p.activeEpisode === ep ? " active" : ""}`} onClick={() => { void p.handleEpisodeSwitch(ep); p.setSettingsScreen("main"); }} style={{ opacity: p.episodeLoading ? 0.5 : 1 }}><span>{episodeLabel} {ep}</span>{p.activeEpisode === ep && <span className="gx-check" style={{ color: "var(--player-text-dim)", fontSize: 14 }}>✓</span>}</div>))}
                         </div>
                       </div>
                     )}
