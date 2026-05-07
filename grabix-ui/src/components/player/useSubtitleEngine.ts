@@ -1,7 +1,7 @@
 // player/useSubtitleEngine.ts
 // Subtitle loading, VTT parsing, cue tracking, appearance settings, subtitle drag.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { versionedStorageKey, readJsonStorage, writeJsonStorage } from "../../lib/persistentState";
 import type { StreamSource } from "../../lib/streamProviders";
 import type { SubtitleAppearanceSettings, SubtitleCue, SubtitlePosition } from "./types";
@@ -71,8 +71,10 @@ export function useSubtitleEngine({
   useEffect(() => { writeJsonStorage("local", SUBTITLE_APPEARANCE_STORAGE_KEY, subtitleAppearance); }, [subtitleAppearance]);
   useEffect(() => { writeJsonStorage("local", SUBTITLE_POSITION_STORAGE_KEY, subtitlePosition); }, [subtitlePosition]);
 
-  // Sync cues ref to state
-  useEffect(() => { subtitleCuesRef.current = subtitleCues; }, [subtitleCues]);
+  // Sync cues ref to state synchronously after render (useLayoutEffect eliminates
+  // the 1-render stale window that useEffect had — ref is current before any
+  // timeupdate event fires in the next paint cycle)
+  useLayoutEffect(() => { subtitleCuesRef.current = subtitleCues; }, [subtitleCues]);
 
   // Playback speed
   useEffect(() => {
@@ -201,8 +203,12 @@ export function useSubtitleEngine({
       const first = activeSubtitles[0];
       if (first?.url) {
         if (subtitleUrl.startsWith("blob:") && subtitleUrl !== first.url) URL.revokeObjectURL(subtitleUrl);
-        setSubtitleUrl(""); setSubtitleCues([]); setCurrentCue("");
-        setTimeout(() => { setSubtitleUrl(first.url); setSubtitleName(first.label); setSubtitlesEnabled(true); }, 0);
+        currentCueRef.current = "";
+        setSubtitleCues([]);
+        setCurrentCue("");
+        setSubtitleUrl(first.url);
+        setSubtitleName(first.label);
+        setSubtitlesEnabled(true);
       }
       return;
     }

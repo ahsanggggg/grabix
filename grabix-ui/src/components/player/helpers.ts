@@ -122,7 +122,7 @@ export function parseSubtitleText(content: string): SubtitleCue[] {
   return cues;
 }
 
-/** O(log n) binary search — replaces O(n) .find() in the hot subtitle tick path */
+/** O(log n) binary search with linear fallback for VTT files with overlapping cues */
 export function findCurrentCue(cues: SubtitleCue[], t: number): SubtitleCue | null {
   let lo = 0, hi = cues.length - 1;
   while (lo <= hi) {
@@ -131,6 +131,10 @@ export function findCurrentCue(cues: SubtitleCue[], t: number): SubtitleCue | nu
     if (t < cue.start) hi = mid - 1;
     else if (t > cue.end) lo = mid + 1;
     else return cue;
+  }
+  // Binary search missed — linear fallback for VTT files with overlapping end times
+  for (let i = 0; i < cues.length; i++) {
+    if (cues[i].start <= t && t <= cues[i].end) return cues[i];
   }
   return null;
 }

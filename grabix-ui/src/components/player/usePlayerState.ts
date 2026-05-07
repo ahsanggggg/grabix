@@ -53,7 +53,7 @@ export function usePlayerState(props: Props) {
 
   const {
     API, baseSources, allSources, activeSource, activeSubtitles, activeIndex: _activeIndex,
-    isDirectEngine, isEmbedEngine, resolvedPlaybackUrl,
+    isDirectEngine, isEmbedEngine,
     goToNextSource, onSourcePlaying,
   } = sourceManager;
 
@@ -63,7 +63,7 @@ export function usePlayerState(props: Props) {
 
   const hlsEngine = useHlsEngine({
     videoRef, activeSource, isDirectEngine, reloadKey,
-    resolvedPlaybackUrl, volumeBoost, setVolumeBoost,
+    volumeBoost, setVolumeBoost,
     subtitleTickRef: subtitleTickBridge,
     setIsLoading, setStatusText, setIsPlaying,
     setFallbackNotice, goToNextSource, onSourcePlaying,
@@ -120,7 +120,7 @@ export function usePlayerState(props: Props) {
   const hasAdaptiveHlsLevels = hlsLevels.length > 1;
   const hasQualityOptions = useMemo(
     () => hlsLevels.length > 1 || sourceManager.isMovieBoxQualityMode || sourceManager.isAnimeQualityMode,
-    [hlsLevels, sourceManager.isMovieBoxQualityMode, sourceManager.isAnimeQualityMode],
+    [hlsLevels.length, sourceManager.isMovieBoxQualityMode, sourceManager.isAnimeQualityMode],
   );
   const currentQualityLabel =
     hlsAutoQuality || selectedHlsLevel === -1
@@ -160,7 +160,6 @@ export function usePlayerState(props: Props) {
     activeSourceOptionId: sourceManager.activeSourceOptionId,
     reloadKey, isLoading, statusText, errorText, fallbackNotice,
     resolvedEmbedUrl: sourceManager.resolvedEmbedUrl,
-    resolvedPlaybackUrl: sourceManager.resolvedPlaybackUrl,
     showChrome: controls.showChrome,
     episodeMenuOpen, setEpisodeMenuOpen,
     volumeBoost, setVolumeBoost,

@@ -11,7 +11,6 @@ interface HlsEngineOptions {
   activeSource: StreamSource | null;
   isDirectEngine: boolean;
   reloadKey: number;
-  resolvedPlaybackUrl: string;
   volumeBoost: number;
   setVolumeBoost: (v: number) => void;
   subtitleTickRef: React.RefObject<(t: number) => void>;
@@ -27,7 +26,7 @@ interface HlsEngineOptions {
 
 export function useHlsEngine({
   videoRef, activeSource, isDirectEngine, reloadKey,
-  resolvedPlaybackUrl, volumeBoost, setVolumeBoost,
+  volumeBoost, setVolumeBoost,
   subtitleTickRef, setIsLoading, setStatusText, setIsPlaying,
   setFallbackNotice, goToNextSource, onSourcePlaying, API, baseSources,
 }: HlsEngineOptions) {
@@ -145,7 +144,7 @@ export function useHlsEngine({
       const defaultUrl = shouldKeepHlsProxied(activeSource)
         ? buildStreamProxyUrl(API, activeSource.url, activeSource.requestHeaders)
         : activeSource.url;
-      const playbackUrl = resolvedPlaybackUrl || defaultUrl;
+      const playbackUrl = defaultUrl;
       if (Hls.isSupported()) {
         const proxied = shouldKeepHlsProxied(activeSource);
         const hls = new Hls({
@@ -195,7 +194,7 @@ export function useHlsEngine({
       events.forEach(([ev, fn]) => video.removeEventListener(ev, fn));
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     };
-  }, [activeSource, isDirectEngine, reloadKey, resolvedPlaybackUrl]); // eslint-disable-line
+  }, [activeSource, isDirectEngine, reloadKey]); // eslint-disable-line
 
   // ── Thumbnail preview HLS ─────────────────────────────────────────────────
   useEffect(() => {
@@ -204,9 +203,9 @@ export function useHlsEngine({
     if (!pv) return;
     if (previewHlsRef.current) { previewHlsRef.current.destroy(); previewHlsRef.current = null; }
     if (activeSource.kind === "hls") {
-      const url = resolvedPlaybackUrl || (shouldKeepHlsProxied(activeSource)
+      const url = shouldKeepHlsProxied(activeSource)
         ? buildStreamProxyUrl(API, activeSource.url, activeSource.requestHeaders)
-        : activeSource.url);
+        : activeSource.url;
       if (Hls.isSupported()) {
         const ph = new Hls({ enableWorker: true, lowLatencyMode: false, startFragPrefetch: false, maxBufferLength: 8, maxMaxBufferLength: 16, backBufferLength: 8, manifestLoadingMaxRetry: 1, fragLoadingMaxRetry: 1, levelLoadingMaxRetry: 1 });
         previewHlsRef.current = ph;
@@ -216,9 +215,23 @@ export function useHlsEngine({
     } else { pv.src = activeSource.url; }
     pv.muted = true; pv.preload = "metadata";
     return () => { if (previewHlsRef.current) { previewHlsRef.current.destroy(); previewHlsRef.current = null; } };
-  }, [API, activeSource, isDirectEngine, resolvedPlaybackUrl]);
+  }, [API, activeSource, isDirectEngine]);
 
   // ── Audio boost ───────────────────────────────────────────────────────────
+  // Teardown effect — runs cleanup whenever source or engine changes, and on unmount.
+  // This prevents AudioContext/GainNode/MediaElementAudioSourceNode from leaking
+  // across source switches (old video element would remain referenced otherwise).
+  useEffect(() => {
+    return () => {
+      try { mediaNodeRef.current?.disconnect(); } catch {}
+      try { void audioContextRef.current?.close(); } catch {}
+      audioContextRef.current = null;
+      gainNodeRef.current = null;
+      mediaNodeRef.current = null;
+    };
+  }, [activeSource, isDirectEngine]);
+
+  // Build / update gain graph on boost change
   useEffect(() => {
     if (!isDirectEngine) return;
     const video = videoRef.current;

@@ -4,7 +4,8 @@ app/routes/streaming.py — FastAPI router for streaming endpoints.
 Previously used route_registry as a bridge to streaming_helpers.py.
 Now imports directly — no registry needed.
 """
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+import asyncio
 
 from streaming_helpers import resolve_embed, stream_proxy, stream_variants, extract_stream
 import downloads.engine as _dl_engine  # ffmpeg_status lives here after extraction
@@ -35,4 +36,7 @@ def ffmpeg_status():
 
 @router.get("/extract-stream")
 async def extract_stream_route(url: str):
-    return await extract_stream(url)
+    try:
+        return await asyncio.wait_for(extract_stream(url), timeout=30.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Stream extraction timed out.")

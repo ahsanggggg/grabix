@@ -58,7 +58,6 @@ export function useSourceManager({
   const [activeIndex, setActiveIndex]               = useState(0);
   const [activeSourceOptionId, setActiveSourceOptionId] = useState(sourceOptions?.[0]?.id ?? "");
   const [resolvedEmbedUrl, setResolvedEmbedUrl]     = useState("");
-  const [resolvedPlaybackUrl, setResolvedPlaybackUrl] = useState("");
   // Local key incremented on each embed retry attempt so the timeout effect re-runs
   const [embedAttemptKey, setEmbedAttemptKey]       = useState(0);
 
@@ -72,7 +71,10 @@ export function useSourceManager({
 
   useEffect(() => { setActiveSourceOptionId(sourceOptions?.[0]?.id ?? ""); }, [sourceOptions]);
 
-  const effectiveSources = runtimeSources.length > 0 ? runtimeSources : sources;
+  const effectiveSources = useMemo(
+    () => runtimeSources.length > 0 ? runtimeSources : sources,
+    [runtimeSources, sources],
+  );
   const baseSources = useMemo<StreamSource[]>(() =>
     effectiveSources && effectiveSources.length > 0
       ? effectiveSources
@@ -113,7 +115,6 @@ export function useSourceManager({
     } else {
       setResolvedEmbedUrl("");
     }
-    setResolvedPlaybackUrl("");
     embedLoadedRef.current = false;
     // Reset embed retry counter whenever the active source changes
     if (activeSource) {
@@ -146,7 +147,7 @@ export function useSourceManager({
       }
     }, 10_000);
     return () => window.clearTimeout(t);
-  }, [activeSource, activeIndex, embedAttemptKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSource, embedAttemptKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Embed URL resolution ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -188,7 +189,10 @@ export function useSourceManager({
       const sibling = findPreparedSiblingIndex(next);
       const nextIndex = sibling >= 0 ? sibling : next;
       const nextSrc = allSources[nextIndex];
-      sourceRetryCountsRef.current[currentKey] = 0;
+      // Clear ALL stale retry entries for the outgoing index before switching
+      Object.keys(sourceRetryCountsRef.current)
+        .filter(k => k.startsWith(`${activeIndex}:`))
+        .forEach(k => { delete sourceRetryCountsRef.current[k]; });
       setFallbackNotice(`${message} Switched to ${nextSrc.label} (${nextSrc.provider}).`);
       setActiveIndex(nextIndex); setReloadKey((k) => k + 1);
       return;
@@ -231,6 +235,7 @@ export function useSourceManager({
           : undefined;
       if (!next) throw new Error(`Could not load ${episodeLabel.toLowerCase()} ${episode}.`);
       const matchedIndex = next.sources.findIndex(s => s.provider === preferredProvider && s.label === preferredLabel);
+      embedRetryCountRef.current = {};
       setRuntimeSources(next.sources);
       setActiveSubtitleText(next.subtitle ?? "");
       setActiveSearchTitle(next.subtitleSearchTitle ?? `${title} ${episodeLabel} ${episode}`);
@@ -299,8 +304,7 @@ export function useSourceManager({
     baseSources, allSources, activeSource, activeSubtitles, activeIndex, setActiveIndex,
     activeEpisode, activeSearchTitle, activeSubtitleText,
     activeSourceOptionId, setActiveSourceOptionId,
-    resolvedEmbedUrl, resolvedPlaybackUrl, setResolvedPlaybackUrl,
-    extracting: false, extractError: "",
+    resolvedEmbedUrl, extracting: false, extractError: "",
     episodeLoading,
     hasFallback, isDirectEngine, isEmbedEngine,
     isMovieBoxQualityMode, isAnimeQualityMode,

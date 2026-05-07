@@ -64,6 +64,7 @@ function ServerSwitcher({
             backdropFilter: "blur(12px)",
           }}
         >
+          <style>{`.gx-srv-item:not(.active):hover { background: rgba(255,255,255,0.06) !important; }`}</style>
           <div style={{ padding: "8px 12px 6px", fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Choose Server
           </div>
@@ -71,6 +72,7 @@ function ServerSwitcher({
             <div
               key={src.id}
               onClick={() => { onSwitch(i); setOpen(false); }}
+              className={i === activeIndex ? "gx-srv-item active" : "gx-srv-item"}
               style={{
                 padding: "9px 14px", cursor: "pointer", fontSize: 12,
                 display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
@@ -79,8 +81,6 @@ function ServerSwitcher({
                 borderLeft: i === activeIndex ? "3px solid var(--accent, #e50914)" : "3px solid transparent",
                 transition: "background 0.1s",
               }}
-              onMouseEnter={e => { if (i !== activeIndex) (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.06)"; }}
-              onMouseLeave={e => { if (i !== activeIndex) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
             >
               <span style={{ fontWeight: i === activeIndex ? 700 : 400 }}>{src.label}</span>
               <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{src.provider}</span>

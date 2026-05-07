@@ -1,8 +1,5 @@
-def get_stream_extractor_helpers():
-    from backend import main as main_module
-
-    return {
-        "resolve_embed_target": main_module._resolve_embed_target,
-        "extract_stream_url": main_module._extract_stream_url,
-        "extract_stream_url_via_browser": main_module._extract_stream_url_via_browser,
-    }
+# stream_extractors.py
+# Previously contained get_stream_extractor_helpers() which is never called
+# anywhere in the codebase and contained a broken import path
+# (from backend import main as main_module → ModuleNotFoundError at runtime).
+# File intentionally emptied.

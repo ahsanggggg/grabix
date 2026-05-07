@@ -53,7 +53,6 @@ export function usePlayerControls({
   const showSubtitlePanelRef = useRef(showSubtitlePanel);
 
   const [showChrome, setShowChrome]   = useState(true);
-  const [, setIsFullscreen]           = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{ x: number; time: number; dataUrl: string; visible: boolean } | null>(null);
 
   // Keep mirror refs fresh
@@ -86,13 +85,6 @@ export function usePlayerControls({
   }, [isPlaying, errorText]);
 
 
-
-  // Fullscreen listener
-  useEffect(() => {
-    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────────
   useEffect(() => {
