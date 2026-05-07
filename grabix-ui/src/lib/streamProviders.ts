@@ -317,10 +317,10 @@ async function resolveProviderPlayback(
   path: string,
   payload: Record<string, unknown>
 ): Promise<StreamSource[]> {
-  // 30-second hard timeout — prevents "loading forever" when the backend
-  // provider chain is slow (e.g. MegaCloud extraction taking 25+ seconds).
+  // 35-second timeout — sits just above the backend's 30s timeout so the
+  // backend's 504 response arrives before we abort, giving a clear error message.
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 55_000);
+  const timeoutId = window.setTimeout(() => controller.abort(), 35_000);
 
   try {
     const response = await fetch(`${BACKEND_API}${path}`, {
@@ -348,13 +348,21 @@ async function resolveProviderPlayback(
   }
 }
 
+function _stableHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = Math.imul(31, hash) + str.charCodeAt(i) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
 function mapMovieBoxSource(
   mediaType: "movie" | "series" | "anime",
   source: MovieBoxSourceResponse,
   index: number
 ): StreamSource {
   return makeSource({
-    id: `moviebox-${mediaType}-${Date.now()}-${index}`,
+    id: `moviebox-${mediaType}-${_stableHash(source.url)}-${index}`,
     label: source.label,
     provider: source.provider,
     kind: source.kind ?? inferStreamKind(source.url, source.mime_type),

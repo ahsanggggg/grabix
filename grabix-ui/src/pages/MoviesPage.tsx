@@ -105,8 +105,12 @@ function HeroBanner({ movies, idx, onSelect, onPlay, onPrev, onNext }: {
   const backdrop = IMG(m.backdrop_path, IMG_LG);
 
   const handleQuickPlay = async () => {
-    const sources = getMovieSources({ tmdbId: m.id });
-    onPlay({ title: m.title, poster: IMG(m.poster_path), sources });
+    try {
+      const sources = await resolveMoviePlaybackSources({ tmdbId: m.id, title: m.title, year: m.release_date ? Number(m.release_date.slice(0, 4)) : undefined });
+      onPlay({ title: m.title, poster: IMG(m.poster_path), sources: sources.length > 0 ? sources : getMovieSources({ tmdbId: m.id }) });
+    } catch {
+      onPlay({ title: m.title, poster: IMG(m.poster_path), sources: getMovieSources({ tmdbId: m.id }) });
+    }
   };
 
   return (

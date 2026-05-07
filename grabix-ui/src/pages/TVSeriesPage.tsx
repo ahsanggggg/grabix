@@ -121,9 +121,13 @@ function HeroBanner({ shows, idx, onSelect, onPlay, onPrev, onNext }: {
   if (!s) return null;
   const backdrop = IMG(s.backdrop_path, IMG_LG);
 
-  const handleQuickPlay = () => {
-    const sources = getTvSources(s.id, { season: 1, episode: 1 });
-    onPlay({ title: s.name, subtitle: "S01 E01", poster: IMG(s.poster_path), sources });
+  const handleQuickPlay = async () => {
+    try {
+      const sources = await resolveTvPlaybackSources({ tmdbId: s.id, title: s.name, season: 1, episode: 1, year: s.first_air_date ? Number(s.first_air_date.slice(0, 4)) : undefined });
+      onPlay({ title: s.name, subtitle: "S01 E01", poster: IMG(s.poster_path), sources: sources.length > 0 ? sources : getTvSources(s.id, { season: 1, episode: 1 }) });
+    } catch {
+      onPlay({ title: s.name, subtitle: "S01 E01", poster: IMG(s.poster_path), sources: getTvSources(s.id, { season: 1, episode: 1 }) });
+    }
   };
 
   return (

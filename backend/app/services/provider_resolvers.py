@@ -103,42 +103,46 @@ async def _resolve_moviebox_sources_by_title(
                 )
                 return sources
 
-        try:
-            direct_sources = await registry.execute(
-                "moviebox",
-                "sources",
-                correlation_id=correlation_id,
-                fallback_used=fallback_used,
-                title=title,
-                media_type=media_type,
-                year=year,
-                season=season,
-                episode=episode,
-            )
-        except ProviderServiceError as error:
-            attempts.append(
-                _attempt_payload(
-                    provider="moviebox",
-                    operation="sources",
-                    success=False,
-                    message=error.message,
+        # Fix #9: Only try direct-by-title lookup when the search returned NO items.
+        # If items were found above but none had sources, a direct lookup for the same
+        # title is very unlikely to succeed and wastes an API call.
+        if not items:
+            try:
+                direct_sources = await registry.execute(
+                    "moviebox",
+                    "sources",
+                    correlation_id=correlation_id,
                     fallback_used=fallback_used,
-                    retryable=error.retryable,
+                    title=title,
+                    media_type=media_type,
+                    year=year,
+                    season=season,
+                    episode=episode,
                 )
-            )
-            direct_sources = []
+            except ProviderServiceError as error:
+                attempts.append(
+                    _attempt_payload(
+                        provider="moviebox",
+                        operation="sources",
+                        success=False,
+                        message=error.message,
+                        fallback_used=fallback_used,
+                        retryable=error.retryable,
+                    )
+                )
+                direct_sources = []
 
-        if direct_sources:
-            attempts.append(
-                _attempt_payload(
-                    provider="moviebox",
-                    operation="sources",
-                    success=True,
-                    message=f"Resolved {len(direct_sources)} Movie Box sources for {title}.",
-                    fallback_used=fallback_used,
+            if direct_sources:
+                attempts.append(
+                    _attempt_payload(
+                        provider="moviebox",
+                        operation="sources",
+                        success=True,
+                        message=f"Resolved {len(direct_sources)} Movie Box sources for {title}.",
+                        fallback_used=fallback_used,
+                    )
                 )
-            )
-            return direct_sources
+                return direct_sources
 
     return []
 

@@ -14,8 +14,14 @@ router = APIRouter()
 
 
 @router.get("/resolve-embed")
-def resolve_embed_route(url: str):
-    return resolve_embed(url)
+async def resolve_embed_route(url: str):
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(resolve_embed, url),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Embed resolution timed out.")
 
 
 @router.get("/stream/proxy")

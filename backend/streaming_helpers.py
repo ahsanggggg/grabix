@@ -17,6 +17,7 @@ Changes from previous version:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -456,30 +457,30 @@ def stream_proxy(url: str, request: Request, headers_json: str = ""):
     )
 
     if is_segment:
-        def _iter_segment():
-            try:
-                with httpx.stream(
-                    "GET", url,
-                    headers=request_headers,
-                    follow_redirects=True,
-                    timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0),
-                ) as r:
-                    if r.status_code not in (200, 206):
-                        return
-                    for chunk in r.iter_bytes(65536):
-                        yield chunk
-            except Exception:
-                return
-
-        return StreamingResponse(
-            _iter_segment(),
-            status_code=200,
-            media_type="video/mp2t",
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "no-store",
-            },
-        )
+        try:
+            with httpx.Client(
+                timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0),
+                follow_redirects=True,
+            ) as client:
+                r = client.get(url, headers=request_headers)
+                if r.status_code not in (200, 206):
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"CDN returned {r.status_code} for video segment",
+                    )
+                return Response(
+                    content=r.content,
+                    status_code=r.status_code,
+                    media_type="video/mp2t",
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "max-age=3600",
+                    },
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Segment fetch failed: {exc}") from exc
 
     try:
         with httpx.Client(timeout=20.0, follow_redirects=True) as client:
@@ -604,7 +605,7 @@ async def extract_stream(url: str):
         return cached[1]
 
     # ── Stage 1: Fast HTTP scanner (2-5 s, no subprocess) ────────────────────
-    fast_result = fast_extract(safe_url)
+    fast_result = await asyncio.to_thread(fast_extract, safe_url)
     if fast_result:
         _m.stream_extract_cache[safe_url] = (
             time.time() + _m.STREAM_EXTRACT_CACHE_TTL_SECONDS,
@@ -614,7 +615,7 @@ async def extract_stream(url: str):
 
     # ── Stage 2: yt-dlp Python API (15-30 s, full quality list + subtitles) ──
     try:
-        payload = ytdlp_extract_full(safe_url)
+        payload = await asyncio.to_thread(ytdlp_extract_full, safe_url)
         _m.stream_extract_cache[safe_url] = (
             time.time() + _m.STREAM_EXTRACT_CACHE_TTL_SECONDS,
             payload,
