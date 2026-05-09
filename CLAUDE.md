@@ -38,7 +38,7 @@ GRABIX is a **Windows desktop application** for downloading, streaming, and mana
 | Framework | Python + FastAPI + Uvicorn |
 | Download engine | yt-dlp + aria2c + FFmpeg |
 | HTTP client | httpx + curl_cffi |
-| Database | SQLite (via db_helpers.py) |
+| Database | SQLite (via app/services/db_helpers.py) |
 | Content APIs | TMDB, IMDb (cinemagoer), Consumet, MovieBox, MangaDex, AniList, Jikan, ComicK |
 | Package manager | pip |
 
@@ -65,9 +65,9 @@ grabix-master/
 │
 ├── backend/                         ← PYTHON BACKEND (FastAPI)
 │   ├── main.py                      ← ★ MAIN ENTRY POINT — FastAPI app, all routers registered here
-│   ├── db_helpers.py                ← SQLite DB connection, all download job CRUD, settings load/save
-│   ├── library_helpers.py           ← Library index builder, DB migration
-│   ├── streaming_helpers.py         ← HLS proxy, stream URL extraction, embed resolvers
+│   ├── db_helpers.py                ← ⚠️ SHIM ONLY — re-exports from app/services/db_helpers.py
+│   ├── library_helpers.py           ← ⚠️ SHIM ONLY — re-exports from app/services/library_helpers.py
+│   ├── streaming_helpers.py         ← ⚠️ SHIM ONLY — re-exports from app/services/streaming_helpers.py
 │   ├── requirements.txt             ← Python dependencies
 │   ├── runtime-config.json          ← Runtime overrides (port, TMDB token, paths)
 │   │
@@ -83,7 +83,10 @@ grabix-master/
 │   │   │   ├── adblock.py           ← /adblock — ad filter list management
 │   │   │   └── consumet.py          ← /consumet — anime episode sources (Consumet API wrapper)
 │   │   │
-│   │   └── services/
+│   │   └── services/                ← ★ ALL BUSINESS LOGIC LIVES HERE
+│   │       ├── db_helpers.py        ← ★ SQLite DB connection, all download job CRUD, settings load/save
+│   │       ├── streaming_helpers.py ← ★ HLS proxy, stream URL extraction, embed resolvers
+│   │       ├── library_helpers.py   ← ★ Library index builder, DB migration
 │   │       ├── providers.py         ← Re-export shim (imports from split files below)
 │   │       ├── provider_types.py    ← BaseProviderAdapter, ProviderPolicy, error types
 │   │       ├── provider_registry.py ← ProviderRegistry class (circuit breaker pattern)
@@ -111,8 +114,8 @@ grabix-master/
 │   │       ├── manga_mangadex.py    ← MangaDex API
 │   │       └── manga_cache.py       ← Manga result caching
 │   │
-│   ├── core/                        ← Phase 2 split — infrastructure helpers
-│   │   ├── main.py                  ← ⚠️ OLD/duplicate of backend/main.py — DO NOT USE as entry point
+│   ├── core/                        ← Infrastructure helpers (Phase 2 split)
+│   │   ├── main.py                  ← ⚠️ OLD/duplicate — DO NOT USE as entry point
 │   │   ├── cache.py                 ← SQLite-backed cache primitives
 │   │   ├── cache_ops.py             ← Cache get/set/refresh ops + /cache router
 │   │   ├── circuit_breaker.py       ← CircuitBreaker class for provider fault tolerance
@@ -121,6 +124,10 @@ grabix-master/
 │   │   ├── network_monitor.py       ← Background network monitoring
 │   │   ├── state.py                 ← Shared state wiring
 │   │   └── utils.py                 ← General utilities
+│   │
+│   ├── downloads/
+│   │   ├── engine.py                ← ⚠️ OVERSIZED (57KB) — download engine (yt-dlp/aria2c wrapper)
+│   │   └── downloads_init.py        ← Download subsystem initializer
 │   │
 │   ├── moviebox/                    ← MovieBox content provider
 │   │   ├── moviebox_fetchers.py     ← Fetch movie/TV data from MovieBox API
@@ -142,141 +149,115 @@ grabix-master/
     │
     ├── src/
     │   ├── main.tsx                 ← React entry point (mounts <App />)
-    │   ├── App.tsx                  ← ★ Root component — routing, runtime health polling, page shell
+    │   ├── App.tsx                  ← Root component — routing, runtime health polling, page shell
     │   ├── App.css / index.css      ← Global styles and CSS variables
     │   │
     │   ├── pages/                   ← One file per page/view
-    │   │   ├── DownloaderPage.tsx   ← Main downloader UI (paste URL → download)
-    │   │   ├── ConverterPage.tsx    ← File converter UI
-    │   │   ├── LibraryPage.tsx      ← Local file library browser
-    │   │   ├── MangaPage.tsx        ← Manga reader
-    │   │   ├── MediaPage.tsx        ← Movie/TV detail + playback
-    │   │   ├── MoviesPage.tsx       ← Browse movies (TMDB)
-    │   │   ├── TVSeriesPage.tsx     ← Browse TV shows (TMDB)
-    │   │   ├── MovieBoxPage.tsx     ← MovieBox streaming source
-    │   │   ├── GenrePage.tsx        ← Browse by genre
-    │   │   ├── FavoritesPage.tsx    ← User's saved favorites
-    │   │   ├── RatingsPage.tsx      ← User's rated content
-    │   │   ├── SettingsPage.tsx     ← App settings UI
-    │   │   ├── WatchHistoryPage.tsx ← Viewing history
-    │   │   ├── ContinueWatchingPage.tsx ← Resume watching
-    │   │   ├── TopImdbPage.tsx      ← IMDb Top 250 charts
-    │   │   ├── NewAndHotPage.tsx    ← Trending/new content
-    │   │   ├── RecentlyAddedPage.tsx← Recently added to library
-    │   │   ├── BrowsePage.tsx       ← General browse
-    │   │   ├── ExplorePage.tsx      ← Explore/discover
-    │   │   ├── DownloaderPreview.tsx← Download preview modal
-    │   │   ├── QueueCard.tsx        ← Individual download queue item
-    │   │   ├── VidSrcPlayer.tsx     ← Embedded VidSrc player page
-    │   │   ├── downloader.types.ts  ← TypeScript types for downloader
-    │   │   └── useDownloaderQueue.ts← Hook for download queue state
+    │   │   ├── DownloaderPage.tsx
+    │   │   ├── ConverterPage.tsx
+    │   │   ├── LibraryPage.tsx      ← ⚠️ OVERSIZED (45KB) — needs splitting
+    │   │   ├── MangaPage.tsx        ← ⚠️ OVERSIZED (54KB) — needs splitting
+    │   │   ├── MediaPage.tsx        ← ⚠️ OVERSIZED (53KB) — needs splitting
+    │   │   ├── MoviesPage.tsx       ← ⚠️ OVERSIZED (37KB) — needs splitting
+    │   │   ├── TVSeriesPage.tsx     ← ⚠️ OVERSIZED (37KB) — needs splitting
+    │   │   ├── MovieBoxPage.tsx     ← ⚠️ OVERSIZED (39KB) — needs splitting
+    │   │   ├── RatingsPage.tsx      ← ⚠️ OVERSIZED (65KB) — needs splitting
+    │   │   ├── SettingsPage.tsx     ← ⚠️ OVERSIZED (55KB) — needs splitting
+    │   │   ├── GenrePage.tsx
+    │   │   ├── FavoritesPage.tsx
+    │   │   ├── WatchHistoryPage.tsx
+    │   │   ├── ContinueWatchingPage.tsx
+    │   │   ├── TopImdbPage.tsx
+    │   │   ├── NewAndHotPage.tsx
+    │   │   ├── RecentlyAddedPage.tsx
+    │   │   ├── BrowsePage.tsx
+    │   │   ├── ExplorePage.tsx
+    │   │   ├── DownloaderPreview.tsx
+    │   │   ├── QueueCard.tsx
+    │   │   ├── downloader.types.ts
+    │   │   └── useDownloaderQueue.ts
     │   │
     │   ├── components/
-    │   │   ├── Sidebar.tsx          ← Main nav sidebar (page switcher)
-    │   │   ├── Topbar.tsx           ← Top bar component
-    │   │   ├── AppToast.tsx         ← Toast notification system
-    │   │   ├── CachedImage.tsx      ← Image with cache + fallback
-    │   │   ├── DownloadOptionsModal.tsx ← Quality/format picker for downloads
-    │   │   ├── ErrorBoundary.tsx    ← React error boundary wrapper
-    │   │   ├── Icons.tsx            ← SVG icon components
-    │   │   ├── Icons_addition.tsx   ← Extra SVG icons
-    │   │   ├── OfflineBanner.tsx    ← "Backend offline" banner
-    │   │   ├── WatchdogBanner.tsx   ← Download watchdog status banner
-    │   │   ├── PageStates.tsx       ← Loading/empty/error states
-    │   │   ├── SubtitlePanel.tsx    ← Subtitle selection UI
-    │   │   ├── TrimSlider.tsx       ← Video trim range slider
-    │   │   ├── VidSrcPlayer.tsx     ← VidSrc iframe player component
+    │   │   ├── Sidebar.tsx
+    │   │   ├── Topbar.tsx
+    │   │   ├── AppToast.tsx
+    │   │   ├── CachedImage.tsx
+    │   │   ├── DownloadOptionsModal.tsx
+    │   │   ├── ErrorBoundary.tsx
+    │   │   ├── Icons.tsx            ← ★ ALL icons here (includes IconHeart — merged May 2026)
+    │   │   ├── OfflineBanner.tsx
+    │   │   ├── WatchdogBanner.tsx
+    │   │   ├── PageStates.tsx
+    │   │   ├── SubtitlePanel.tsx
+    │   │   ├── TrimSlider.tsx
+    │   │   ├── VidSrcPlayer.tsx     ← ★ The real VidSrc player (32KB)
     │   │   │
     │   │   ├── player/              ← Custom HLS video player
-    │   │   │   ├── useHlsEngine.ts  ← hls.js setup and management
-    │   │   │   ├── usePlayerControls.ts ← Play/pause/seek/volume controls
-    │   │   │   ├── usePlayerState.ts    ← Player state (current time, buffered, etc.)
-    │   │   │   ├── useSourceManager.ts  ← Source switching and quality selection
-    │   │   │   ├── useSubtitleEngine.ts ← Subtitle rendering engine
-    │   │   │   ├── MiniPlayer.tsx       ← Picture-in-picture mini player
-    │   │   │   ├── NextEpisodeCountdown.tsx ← Auto-play next episode countdown
-    │   │   │   ├── SkipButton.tsx       ← Skip intro/outro button
-    │   │   │   ├── SpeedSelector.tsx    ← Playback speed selector
-    │   │   │   ├── helpers.ts           ← Player utility functions
-    │   │   │   └── types.ts             ← Player TypeScript types
+    │   │   │   ├── useHlsEngine.ts
+    │   │   │   ├── usePlayerControls.ts
+    │   │   │   ├── usePlayerState.ts
+    │   │   │   ├── useSourceManager.ts
+    │   │   │   ├── useSubtitleEngine.ts
+    │   │   │   ├── MiniPlayer.tsx
+    │   │   │   ├── NextEpisodeCountdown.tsx
+    │   │   │   ├── SkipButton.tsx
+    │   │   │   ├── SpeedSelector.tsx
+    │   │   │   ├── helpers.ts
+    │   │   │   └── types.ts
     │   │   │
     │   │   ├── movies/              ← Movie browsing components
-    │   │   │   ├── MovieCard.tsx    ← Single movie card (poster + info)
-    │   │   │   ├── MovieGrid.tsx    ← Grid layout for movies
-    │   │   │   ├── MovieRow.tsx     ← Horizontal scroll row
-    │   │   │   └── TopTenRow.tsx    ← Top 10 numbered row
-    │   │   │
     │   │   ├── tv/                  ← TV show browsing components
-    │   │   │   ├── TVCard.tsx
-    │   │   │   ├── TVGrid.tsx
-    │   │   │   ├── TVRow.tsx
-    │   │   │   └── TopTenRow.tsx
-    │   │   │
     │   │   ├── search/              ← Search UI components
-    │   │   │   ├── LiveSearch.tsx   ← Real-time search input
-    │   │   │   ├── MoodPills.tsx    ← Mood-based filter pills
-    │   │   │   └── SearchFilters.tsx← Advanced filter dropdowns
-    │   │   │
     │   │   ├── shared/              ← Generic reusable components
-    │   │   │   ├── BadgeOverlay.tsx ← Badge (HD, NEW, etc.) overlay
-    │   │   │   ├── HoverCard.tsx    ← Hover preview card
-    │   │   │   ├── NotificationBell.tsx ← Notification icon
-    │   │   │   ├── ProgressBar.tsx  ← Watch progress bar
-    │   │   │   └── RatingButtons.tsx← Like/dislike rating buttons
-    │   │   │
     │   │   ├── profile/             ← User profile components
-    │   │   │   ├── KidsProfile.tsx  ← Kids mode profile UI
-    │   │   │   └── ProfileSwitcher.tsx ← Profile selection UI
-    │   │   │
     │   │   └── hero/
-    │   │       └── TrailerBackground.tsx ← Hero section trailer background
     │   │
     │   ├── context/                 ← React Context providers
-    │   │   ├── ThemeContext.tsx      ← Dark/light theme
-    │   │   ├── FavoritesContext.tsx  ← Favorites list (localStorage)
-    │   │   ├── ContentFilterContext.tsx ← Adult content filter
-    │   │   ├── RuntimeHealthContext.tsx ← Backend health state
-    │   │   └── ProfileContext.tsx   ← Multi-profile management (up to 5 profiles)
+    │   │   ├── ThemeContext.tsx
+    │   │   ├── FavoritesContext.tsx
+    │   │   ├── ContentFilterContext.tsx
+    │   │   ├── RuntimeHealthContext.tsx
+    │   │   └── ProfileContext.tsx
     │   │
     │   ├── hooks/                   ← Custom React hooks
-    │   │   ├── useContinueWatching.ts ← Resume watch state
-    │   │   ├── useMiniPlayer.ts     ← Mini player state + provider
-    │   │   ├── useNotifications.ts  ← In-app notification queue
-    │   │   ├── useRatings.ts        ← Like/dislike rating state
-    │   │   ├── useRemindMe.ts       ← Remind-me feature
-    │   │   └── useSeenIds.ts        ← Track seen content IDs
+    │   │   ├── useContinueWatching.ts
+    │   │   ├── useMiniPlayer.ts
+    │   │   ├── useNotifications.ts
+    │   │   ├── useRatings.ts
+    │   │   ├── useRemindMe.ts
+    │   │   └── useSeenIds.ts
     │   │
     │   └── lib/                     ← Utility libraries
-    │       ├── api.ts               ← ★ Backend API client (BACKEND_API, backendJson, health polling)
-    │       ├── tmdb.ts              ← TMDB API calls (browser-side, uses VITE_TMDB_TOKEN)
-    │       ├── appSettings.ts       ← App settings helpers
-    │       ├── cache.ts             ← Frontend cache utilities
-    │       ├── consumetProviders.ts ← Consumet anime provider list
-    │       ├── contentFilter.ts     ← Content filtering logic
-    │       ├── downloads.ts         ← Download trigger helpers
-    │       ├── imdbCharts.ts        ← IMDb chart fetching
-    │       ├── mangaOffline.ts      ← Offline manga reading
-    │       ├── mangaProviders.ts    ← Manga provider calls
-    │       ├── mangaZip.ts          ← Manga ZIP download
-    │       ├── mediaCache.ts        ← Media metadata cache
-    │       ├── moodKeywords.ts      ← Mood-based search keywords
-    │       ├── performance.ts       ← Performance marks/measures
-    │       ├── persistentState.ts   ← localStorage read/write helpers
-    │       ├── streamProviders.ts   ← Stream source fetching (MovieBox etc.)
-    │       ├── supabase.ts          ← Supabase client (optional auth)
-    │       ├── topRatedMedia.ts     ← Top rated content helpers
-    │       ├── trailerResolver.ts   ← Trailer URL resolution
-    │       ├── useOfflineDetection.ts ← Backend offline detector hook
-    │       ├── useRetryWithBackoff.ts ← Exponential backoff retry hook
-    │       └── useWatchdog.ts       ← Download watchdog hook
+    │       ├── api.ts               ← ★ Backend API client (use this for ALL backend calls)
+    │       ├── tmdb.ts              ← TMDB browser-side calls (falls back to backend if no token)
+    │       ├── appSettings.ts
+    │       ├── cache.ts
+    │       ├── consumetProviders.ts
+    │       ├── contentFilter.ts
+    │       ├── downloads.ts
+    │       ├── imdbCharts.ts
+    │       ├── mangaOffline.ts
+    │       ├── mangaProviders.ts
+    │       ├── mangaZip.ts
+    │       ├── mediaCache.ts
+    │       ├── moodKeywords.ts
+    │       ├── performance.ts
+    │       ├── persistentState.ts
+    │       ├── streamProviders.ts
+    │       ├── supabase.ts
+    │       ├── topRatedMedia.ts
+    │       ├── trailerResolver.ts
+    │       ├── useOfflineDetection.ts
+    │       ├── useRetryWithBackoff.ts
+    │       └── useWatchdog.ts
     │
-    └── src-tauri/                   ← Tauri/Rust desktop shell
-        ├── tauri.conf.json          ← Tauri config (window, CSP, bundle targets)
-        ├── Cargo.toml               ← Rust dependencies
+    └── src-tauri/                   ← Tauri/Rust desktop shell (use THIS one, not root src-tauri/)
+        ├── tauri.conf.json
+        ├── Cargo.toml
         ├── src/
-        │   ├── main.rs              ← Rust main entry
-        │   └── lib.rs               ← Tauri commands / setup
-        └── capabilities/default.json ← Tauri permission capabilities
+        │   ├── main.rs
+        │   └── lib.rs
+        └── capabilities/default.json
 ```
 
 ---
@@ -294,7 +275,7 @@ FastAPI backend (127.0.0.1:8000)            TMDB API (external)
         ↓
 app/routes/*.py  →  app/services/*.py
         ↓
-SQLite DB (db_helpers.py)  |  yt-dlp/FFmpeg/aria2c  |  External APIs (TMDB, Consumet, etc.)
+SQLite DB (app/services/db_helpers.py)  |  yt-dlp/FFmpeg/aria2c  |  External APIs
 ```
 
 ### Key data flows:
@@ -331,7 +312,7 @@ SQLite DB (db_helpers.py)  |  yt-dlp/FFmpeg/aria2c  |  External APIs (TMDB, Cons
 
 | Route | Method | What it does |
 |---|---|---|
-| `/` | GET | Health check — returns `{"status": "GRABIX Backend Running"}` |
+| `/` | GET | Health check |
 | `/health` | GET | Full service health report |
 | `/health/capabilities` | GET | What features are available |
 | `/diagnostics` | GET | Startup diagnostics |
@@ -359,13 +340,13 @@ SQLite DB (db_helpers.py)  |  yt-dlp/FFmpeg/aria2c  |  External APIs (TMDB, Cons
 
 ### Python (backend)
 - All routes live in `app/routes/` — one file per feature area
-- Services (business logic) live in `app/services/`
+- All business logic lives in `app/services/` — this is where db_helpers, streaming_helpers, and library_helpers now live
 - Infrastructure helpers live in `core/`
-- `backend/main.py` is the **real** entry point — `backend/core/main.py` is an old Phase 2 artifact, ignore it
+- `backend/main.py` is the **real** entry point — `backend/core/main.py` is an old artifact, ignore it
+- The three files at backend root (`db_helpers.py`, `streaming_helpers.py`, `library_helpers.py`) are **shims** — they just forward to `app/services/`. Do NOT add new logic to them
 - Never add logic to `app/services/providers.py` — it is a re-export shim only
 - Use `get_logger("name")` from `logging_utils.py` for all logging
-- Use `log_event(logger, level, event=..., message=..., ...)` for structured logs
-- All DB ops go through `db_helpers.py` — never raw SQLite in route files
+- All DB ops go through `app/services/db_helpers.py` — never raw SQLite in route files
 - `runtime_config.py` is the single source of truth for paths and env vars
 
 ### TypeScript / React (frontend)
@@ -377,6 +358,7 @@ SQLite DB (db_helpers.py)  |  yt-dlp/FFmpeg/aria2c  |  External APIs (TMDB, Cons
 - State management: React Context only — no Redux, no Zustand
 - localStorage helpers: use `readJsonStorage()` / `writeJsonStorage()` from `lib/persistentState.ts`
 - All pages are wrapped in `<ErrorBoundary>` in App.tsx
+- Icons: use `Icons.tsx` only — `Icons_addition.tsx` has been deleted (merged May 2026)
 
 ---
 
@@ -392,14 +374,20 @@ Completed:
 - Phase 3 — Anime, Manga, Movies & TV browsing
 - Phase 4 — Provider system, stream resolvers, MovieBox integration
 
+Structural cleanup done (May 2026):
+- Moved `db_helpers.py`, `streaming_helpers.py`, `library_helpers.py` from backend root → `app/services/`
+- Old locations now have compatibility shims (all existing imports still work)
+- Merged `Icons_addition.tsx` into `Icons.tsx` — `Icons_addition.tsx` deleted
+- Deleted empty `pages/VidSrcPlayer.tsx` (was an unused re-export shell)
+
 Currently debugging: provider stream resolution, HLS playback stability, and various API integration issues.
 
 ---
 
 ## 9. Known Gotchas & Past Decisions
 
-- **`backend/core/main.py` is NOT the entry point.** `backend/main.py` is. The `core/` folder was a Phase 2 refactor that split out infrastructure, but `core/main.py` is a leftover duplicate — it should be ignored.
-- **Two `main.py` files exist** — this is confusing but intentional (historical). When debugging backend startup, always look at `backend/main.py`.
+- **`backend/core/main.py` is NOT the entry point.** `backend/main.py` is. The `core/` folder was a Phase 2 refactor that split out infrastructure, but `core/main.py` is a leftover — it should be ignored.
+- **The three root-level helpers are shims.** `backend/db_helpers.py`, `backend/streaming_helpers.py`, `backend/library_helpers.py` are now one-liner forwards to `app/services/`. The real code lives in `app/services/`. Do not put new code in the shims.
 - **Port conflict:** If backend fails to start with "port already in use", another GRABIX process is running. Kill it first.
 - **`providers.py`** in `app/services/` is ONLY a re-export shim — all actual provider logic is split across `provider_types.py`, `provider_registry.py`, `provider_adapters.py`, `provider_resolvers.py`, `provider_helpers.py`.
 - **TMDB can be called from both browser AND backend** — browser calls use `VITE_TMDB_TOKEN`; backend calls use `GRABIX_TMDB_BEARER_TOKEN`. If the frontend token is not set, it proxies through the backend automatically.
@@ -407,6 +395,7 @@ Currently debugging: provider stream resolution, HLS playback stability, and var
 - **Supabase is optional** — only used if configured. The app works fully offline without it.
 - **aria2c processes** are tracked in `download_controls` and automatically terminated on exit via `atexit`.
 - **Adult content** is protected by bcrypt-hashed password stored in settings — requires bcrypt to be installed.
+- **`downloads/engine.py` is 57KB** — it is oversized but intentionally not split yet. When touching it, be extra careful as many things depend on it.
 
 ---
 
@@ -423,14 +412,14 @@ When you report an error, include:
 | Symptom | Files to upload |
 |---|---|
 | Backend won't start | `backend/main.py`, `backend/app/services/runtime_config.py` |
-| Download not starting | `backend/app/routes/downloads.py`, `backend/db_helpers.py` |
+| Download not starting | `backend/app/routes/downloads.py`, `backend/app/services/db_helpers.py` |
 | Stream won't play / no sources | `backend/app/services/provider_adapters.py`, `provider_resolvers.py`, `grabix-ui/src/components/player/useSourceManager.ts` |
 | HLS player broken | `grabix-ui/src/components/player/useHlsEngine.ts`, `usePlayerState.ts` |
 | Manga not loading | `backend/app/routes/manga.py`, `backend/app/services/manga_mangadex.py` |
 | TMDB data missing | `backend/app/services/tmdb.py`, `grabix-ui/src/lib/tmdb.ts` |
 | Settings not saving | `backend/app/services/settings_service.py`, `grabix-ui/src/pages/SettingsPage.tsx` |
 | Health check failing | `backend/core/health.py`, `grabix-ui/src/lib/api.ts` |
-| Library not showing files | `backend/library_helpers.py`, `grabix-ui/src/pages/LibraryPage.tsx` |
+| Library not showing files | `backend/app/services/library_helpers.py`, `grabix-ui/src/pages/LibraryPage.tsx` |
 | Auth/CORS errors | `backend/app/services/desktop_auth.py`, `backend/app/services/security.py` |
 | Subtitles broken | `backend/app/routes/subtitles.py`, `backend/app/services/subtitles.py`, `grabix-ui/src/components/player/useSubtitleEngine.ts` |
 | MovieBox not working | `backend/moviebox/moviebox_fetchers.py`, `backend/moviebox/routes.py` |
@@ -447,74 +436,215 @@ After every significant debugging session or architectural change:
 4. If new env vars were added, update **Environment Variables** (Section 5)
 5. If new API endpoints were added, update **Key Backend API Endpoints** (Section 6)
 
-
----
-name: karpathy-guidelines
-description: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
-license: MIT
 ---
 
-# Karpathy Guidelines
+## 12. Loose Coupling Rules
 
-Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls.
+This project had a "tight coupling" problem — files depended on each other in unpredictable ways, causing one fix to break three other things. These rules exist to stop that from getting worse, and to slowly make it better.
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+### What tight coupling looks like (avoid this)
 
-## 1. Think Before Coding
-
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-## 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-## 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-## 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
 ```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
+# BAD — a route file reaching into another route's internals
+from app.routes.downloads import _internal_helper
+
+# BAD — a page doing everything itself (data fetch + state + UI in one 500-line file)
+# MediaPage.tsx — 53KB, handles: API calls, local state, caching, rendering, modals
+
+# BAD — two files importing each other (circular dependency)
+# file_a.py imports from file_b.py
+# file_b.py imports from file_a.py
 ```
 
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+### What loose coupling looks like (do this)
 
-Fix the code and give me the fixed files and tell me where to paste them 
-also if you make any change in code create or remove or edit or any thing you do with code alway update this files for next claude account also update it if you only make changes in the code ok
+```
+# GOOD — route files only import from services, never from each other
+from app.services.db_helpers import get_db_connection
+from app.services.settings_service import load_settings
+
+# GOOD — a page file that is thin (under 10KB ideally)
+# It calls a hook for data, a hook for state, and just renders UI
+# Each concern lives in its own file
+
+# GOOD — services only import from core, never from routes
+from core.cache import get_cached
+```
+
+### The layer rule
+
+Each layer is only allowed to talk to the layer directly below it:
+
+```
+Frontend Pages
+      ↓  (calls only)
+Frontend Hooks & Lib (api.ts, hooks/)
+      ↓  (HTTP calls only)
+Backend Routes (app/routes/)
+      ↓  (calls only)
+Backend Services (app/services/)
+      ↓  (calls only)
+Core Infrastructure (core/) + DB (db_helpers.py)
+```
+
+**A layer must never skip past its neighbor.** A page must not call the DB directly. A route must not call another route. A service must not import from a route.
+
+### File size limits (warning signs)
+
+| File type | Warning | Danger |
+|---|---|---|
+| Backend route file | > 200 lines | > 500 lines |
+| Backend service file | > 300 lines | > 800 lines |
+| Frontend page file | > 200 lines | > 500 lines |
+| Frontend component | > 150 lines | > 300 lines |
+| Frontend hook | > 100 lines | > 200 lines |
+
+If a file is in the "danger" zone, it is doing too many jobs and will cause the "fix one, break three" problem.
+
+### Rules for new code
+
+1. **New backend logic goes in `app/services/`** — never directly in route files or `main.py`
+2. **New frontend data-fetching goes in a hook** (`hooks/` or inline `use*.ts`) — never inline in a page component
+3. **No circular imports** — if A imports B, then B must not import A
+4. **One responsibility per file** — a file that "does downloads AND manages the queue AND tracks history" needs to be split
+5. **Never import from a sibling route** — `downloads.py` must never import from `streaming.py`
+
+---
+
+## 13. Safe Bug-Fixing Protocol
+
+This is the most important section. Following this protocol is what stops one fix from breaking three other things.
+
+### Rule 1: One bug per conversation
+
+Start a fresh conversation for each bug. Do not try to fix two bugs in the same chat. Claude has no memory between conversations — mixing two bugs causes it to confuse the context and make wrong assumptions.
+
+### Rule 2: Name the files before touching them
+
+Before asking Claude to write any code, ask this first:
+
+> *"Before you change anything — which files will you need to touch to fix this? What else could break?"*
+
+If Claude names more than 3-4 files, the bug is too big for one conversation. Break it into smaller pieces.
+
+### Rule 3: Upload only the relevant files
+
+Do not upload 50 files and say "here is my project, fix the bug." Upload only the files Claude said it needs. This forces surgical changes.
+
+### Rule 4: Ask Claude to explain the change before making it
+
+Ask: *"What exactly will you change, and why? What will stay the same?"*
+
+If the explanation sounds like it touches things unrelated to your bug, stop and narrow the scope.
+
+### Rule 5: Test immediately after each fix
+
+After applying a fix, test only the thing that was fixed before moving on. If something else broke, that is now a separate bug — start a new conversation for it.
+
+### The safe prompt template (copy-paste this)
+
+```
+I am working on GRABIX — a desktop app with a Python/FastAPI backend and a React/TypeScript frontend.
+
+[Paste the relevant section of CLAUDE.md here if needed]
+
+I have a specific bug:
+- What I was doing: [describe the action]
+- What happened: [describe the error or wrong behavior]
+- The exact error message: [paste it]
+
+Files I think are involved: [list 1-3 files]
+
+Before writing any code:
+1. Tell me which files you will touch
+2. Tell me what could break
+3. Tell me what you will NOT touch
+
+Then make only the minimum change needed to fix this bug.
+Give me the fixed files and tell me exactly where to put them.
+After the fix, update CLAUDE.md if the change is significant.
+```
+
+---
+
+## 14. Remaining Cleanup Roadmap
+
+These are known problems that still need to be fixed. Each one is a separate conversation.
+
+### Priority 1 — Split the oversized page files
+
+Each of these pages is doing data fetching + state management + UI rendering all in one file. They need to be split into:
+- A page shell file (thin, just renders layout)
+- A data hook (`use[PageName]Data.ts`)
+- Sub-components for each visual section
+
+| File | Current size | Priority |
+|---|---|---|
+| `RatingsPage.tsx` | 65KB | High |
+| `SettingsPage.tsx` | 55KB | High |
+| `MangaPage.tsx` | 54KB | High |
+| `MediaPage.tsx` | 53KB | High |
+| `LibraryPage.tsx` | 45KB | Medium |
+| `MovieBoxPage.tsx` | 39KB | Medium |
+| `TVSeriesPage.tsx` | 37KB | Medium |
+| `MoviesPage.tsx` | 37KB | Medium |
+
+**How to do it (one page at a time):**
+1. Start a new conversation
+2. Upload only that page file
+3. Ask Claude: "Split this page into: a thin shell, a data hook, and sub-components. Show me the plan before writing any code."
+4. Review the plan, then apply it
+
+### Priority 2 — Split `downloads/engine.py`
+
+This file is 57KB and handles too many things. It needs to be split into at least:
+- `engine_core.py` — the main download orchestration
+- `engine_ytdlp.py` — yt-dlp specific logic
+- `engine_aria2.py` — aria2c specific logic
+- `engine_progress.py` — progress tracking and callbacks
+
+Do this in a single dedicated conversation — upload only `downloads/engine.py` and `downloads/downloads_init.py`.
+
+### Priority 3 — Resolve the two `main.py` situation
+
+`backend/core/main.py` (23KB) and `backend/main.py` (26KB) both exist. The `core/main.py` is a historical leftover. A future conversation should:
+1. Confirm which functions in `core/main.py` are NOT already in `backend/main.py`
+2. Move any unique logic into the right service file
+3. Delete `core/main.py`
+
+### Priority 4 — Frontend API leakage
+
+Some frontend `lib/` files call external APIs directly (TMDB, IMDb charts) instead of going through the backend. Over time these should be moved to the backend. Not urgent — the app works either way — but it means two places can break instead of one.
+
+Files to eventually move:
+- `lib/imdbCharts.ts` → new backend endpoint `/imdb/charts`
+- `lib/topRatedMedia.ts` → new backend endpoint `/content/top-rated`
+
+---
+
+## 15. AI Instructions (Read This First)
+
+**These rules apply to every conversation about this project:**
+
+1. **Read this entire CLAUDE.md before touching any code.** Do not start writing until you understand where things live.
+
+2. **State your plan before writing code.** Say which files you will touch and which you will not.
+
+3. **Touch only what is necessary.** Do not "improve" unrelated code. Do not refactor things that are not broken. Do not add features that were not asked for.
+
+4. **Match the existing style.** Do not change formatting, variable names, or patterns unless the bug requires it.
+
+5. **Give the user fixed files with clear instructions.** After every code change, tell the user:
+   - Which file to replace (exact path)
+   - What you changed and why
+   - What to test to confirm the fix worked
+
+6. **Update this CLAUDE.md after every significant change.** If you move a file, rename something, add an endpoint, or make any structural change — update the relevant section of this file and give the user the updated CLAUDE.md to replace.
+
+7. **Never try to fix multiple bugs in one conversation.** If the user asks to fix several things at once, do the most important one first and explain why the others need separate conversations.
+
+8. **Flag oversized files.** If the user asks you to edit a file marked ⚠️ OVERSIZED in Section 3, warn them that the file is a high-risk area and get confirmation before proceeding.
+
+9. **The layer rule is sacred.** Never suggest code that skips a layer (e.g. a page calling the DB directly, a route importing from another route). If the fix requires that, say so explicitly and propose a better path.
+
+10. **Always give the user the fixed files, not just code snippets.** The user is not a programmer — they need complete files they can copy-paste and drop into place.

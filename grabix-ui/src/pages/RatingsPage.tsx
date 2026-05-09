@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { TMDB_IMAGE_BASE as IMG_BASE, discoverTmdbMedia } from "../lib/tmdb";
 import { fetchMovieBoxDiscover, type MovieBoxItem } from "../lib/streamProviders";
 import { getImdbTop250MovieChart, getImdbTop250TvChart } from "../lib/imdbCharts";
+// FIX #2: RatingButtons was built but never imported — user ratings were completely disconnected
+import { RatingButtons } from "../components/shared/RatingButtons";
 
 const API        = "https://api.imdbapi.dev";
 const JIKAN      = "https://api.jikan.moe/v4";
@@ -239,7 +241,8 @@ const CANONICAL_TOP_TV: CanonicalTitle[] = [
   { title: "The Penguin", year: 2024, kind: "tv" },
   { title: "Rings of Power", year: 2022, kind: "tv" },
   { title: "Abbott Elementary", year: 2021, kind: "tv" },
-  { title: "The Bear", year: 2022, kind: "tv" },
+  // FIX #4: "The Bear" was duplicated here (also at position ~34 above) — removed second entry.
+  // The duplicate inflated the count and shifted all ranking numbers after it.
   { title: "Bluey", year: 2018, kind: "tv" },
   { title: "It's Always Sunny in Philadelphia", year: 2005, kind: "tv" },
   { title: "Narcos: Mexico", year: 2018, kind: "tv" },
@@ -255,17 +258,28 @@ function canonicalTitlesToFallback(entries: CanonicalTitle[]): MovieBoxItem[] {
   }));
 }
 
+// FIX #11: rating colour scale was unintuitive — 9.0+ was blue (#1d4ed8) which means
+// "absolute best" showed as blue while good (8.0+) showed as green.
+// Every standard rating system uses gold/warm for the top tier.
+// New scale: 9.0+ gold → 8.5+ dark-green → 8.0+ green → 7.0+ amber → 6.0+ orange → 5.0+ red → purple
 function getRatingColor(r: number|null): string {
   if (!r) return "var(--bg-surface2)";
-  if (r >= 9.0) return "#1d4ed8"; if (r >= 8.5) return "#15803d";
-  if (r >= 8.0) return "#16a34a"; if (r >= 7.0) return "#ca8a04";
-  if (r >= 6.0) return "#c2410c"; if (r >= 5.0) return "#b91c1c";
-  return "#6d28d9";
+  if (r >= 9.0) return "#d97706"; // gold  — Absolute Cinema
+  if (r >= 8.5) return "#15803d"; // dark green — Awesome
+  if (r >= 8.0) return "#16a34a"; // green — Great
+  if (r >= 7.0) return "#ca8a04"; // amber — Good
+  if (r >= 6.0) return "#c2410c"; // orange — Regular
+  if (r >= 5.0) return "#b91c1c"; // red — Bad
+  return "#6d28d9";               // purple — Garbage
 }
 const LEGEND = [
-  { label:"Absolute Cinema", color:"#1d4ed8" }, { label:"Awesome", color:"#15803d" },
-  { label:"Great", color:"#16a34a" }, { label:"Good", color:"#ca8a04" },
-  { label:"Regular", color:"#c2410c" }, { label:"Bad", color:"#b91c1c" }, { label:"Garbage", color:"#6d28d9" },
+  { label:"Absolute Cinema", color:"#d97706" }, // FIX #11: was #1d4ed8 (blue)
+  { label:"Awesome", color:"#15803d" },
+  { label:"Great", color:"#16a34a" },
+  { label:"Good", color:"#ca8a04" },
+  { label:"Regular", color:"#c2410c" },
+  { label:"Bad", color:"#b91c1c" },
+  { label:"Garbage", color:"#6d28d9" },
 ];
 function fmt(n: number) {
   if (n >= 1_000_000) return (n/1_000_000).toFixed(1)+"M";
@@ -284,6 +298,9 @@ type TopTab = "movies"|"tv"|"anime";
 const INITIAL_VISIBLE_COUNT = 40;
 const VISIBLE_INCREMENT = 40;
 const MIN_TOP_ITEMS = 100;
+// FIX #9: cap the episode grid at 20 seasons — a show like The Simpsons
+// (35+ seasons) would otherwise create an unusably wide horizontal scroll.
+const MAX_DISPLAY_SEASONS = 20;
 
 function hasPoster(item: { poster_path?: string | null; poster_proxy?: string; poster?: string }): boolean {
   return Boolean(item.poster_path || item.poster_proxy || item.poster);
@@ -333,7 +350,17 @@ export default function RatingsPage() {
   const [movieSourceLabel, setMovieSourceLabel] = useState("IMDb");
   const [tvSourceLabel, setTvSourceLabel]       = useState("IMDb");
   const [topLoading, setTopLoading]   = useState(false);
+
+  // FIX #12: these were declared AFTER derived computations (visibleMovies, visibleTv)
+  // which is confusing and non-standard. All useState calls now live together at the top.
+  const [movieVisibleCount, setMovieVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+  const [tvVisibleCount, setTvVisibleCount]       = useState(INITIAL_VISIBLE_COUNT);
+  // FIX #5: animeVisibleCount was missing entirely — anime rendered all items at once.
+  const [animeVisibleCount, setAnimeVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+
   const debounce = useRef<ReturnType<typeof setTimeout>|null>(null);
+  // FIX #12: ratingsScrollRef moved up alongside other refs, not buried mid-component.
+  const ratingsScrollRef = useRef<HTMLDivElement | null>(null);
 
   const fetchCanonicalTopList = useCallback(async (entries: CanonicalTitle[]): Promise<MovieBoxItem[]> => {
     const settled = await Promise.allSettled(entries.map(async (entry) => {
@@ -380,7 +407,6 @@ export default function RatingsPage() {
     try {
       const enrichedMovies = await fetchCanonicalTopList(CANONICAL_TOP_MOVIES);
       if (enrichedMovies.length > 0) {
-        // Patch poster/rating data into full canonical list (preserves order & all 100 items)
         const posterMap = new Map(enrichedMovies.map(m => [m.title?.toLowerCase().trim(), m]));
         canonicalMovies = canonicalMovies.map(m => {
           const enriched = posterMap.get(m.title?.toLowerCase().trim());
@@ -414,7 +440,6 @@ export default function RatingsPage() {
     try {
       const enrichedTv = await fetchCanonicalTopList(CANONICAL_TOP_TV);
       if (enrichedTv.length > 0) {
-        // Patch poster/rating data into full canonical list (preserves order & all 100 items)
         const posterMap = new Map(enrichedTv.map(m => [m.title?.toLowerCase().trim(), m]));
         canonicalTv = canonicalTv.map(m => {
           const enriched = posterMap.get(m.title?.toLowerCase().trim());
@@ -517,11 +542,16 @@ export default function RatingsPage() {
       try {
         const r = await fetch(`${API}/search/titles?query=${encodeURIComponent(query)}&limit=8`);
         const j = await r.json();
-        const list: SearchResult[] = j.titles ?? [];
+        // FIX #7: filterType was applied to full search results but NOT to autocomplete suggestions.
+        // Typing "Inception" with filter set to "TV Series" would still show movie results in the
+        // dropdown. Now the same filter applies to both.
+        const list: SearchResult[] = (j.titles ?? []).filter(
+          (t: SearchResult) => filterType === "ALL" || t.type === filterType
+        );
         setSuggestions(list); setShowSug(list.length > 0);
       } catch { /* silent */ }
     }, 350);
-  }, [query, detail]);
+  }, [query, detail, filterType]);
 
   const selectTitle = async (id: string, title?: string) => {
     setShowSug(false); setSuggestions([]);
@@ -539,15 +569,24 @@ export default function RatingsPage() {
         const seas: SeasonData[] = sj.seasons ?? [];
         setSeasons(seas); setLoadingGrid(true);
         const epMap: Record<string,EpisodeData[]> = {};
-        await Promise.all(seas.map(async (s) => {
-          let all: EpisodeData[] = [], token = "";
-          do {
-            const url = `${API}/titles/${id}/episodes?season=${s.season}&pageSize=50${token?`&pageToken=${token}`:""}`;
-            const ej = await (await fetch(url)).json();
-            all = all.concat(ej.episodes ?? []); token = ej.nextPageToken ?? "";
-          } while (token);
-          epMap[s.season] = all.sort((a,b) => a.episodeNumber - b.episodeNumber);
-        }));
+        // FIX #10: all seasons were fetched simultaneously with Promise.all, which fires
+        // potentially 30+ requests at once (each season also has a pagination loop inside).
+        // This hammers the API and triggers rate limits. Now processed in batches of 3.
+        const SEASON_BATCH = 3;
+        for (let i = 0; i < seas.length; i += SEASON_BATCH) {
+          const batch = seas.slice(i, i + SEASON_BATCH);
+          await Promise.all(batch.map(async (s) => {
+            let all: EpisodeData[] = [], token = "";
+            do {
+              const url = `${API}/titles/${id}/episodes?season=${s.season}&pageSize=50${token?`&pageToken=${token}`:""}`;
+              const ej = await (await fetch(url)).json();
+              all = all.concat(ej.episodes ?? []); token = ej.nextPageToken ?? "";
+            } while (token);
+            epMap[s.season] = all.sort((a,b) => a.episodeNumber - b.episodeNumber);
+          }));
+          // Small delay between batches to be respectful to the API
+          if (i + SEASON_BATCH < seas.length) await new Promise(r => setTimeout(r, 300));
+        }
         setEpisodes(epMap); setLoadingGrid(false);
       }
     } catch(e: unknown) { setError(e instanceof Error ? e.message : "Failed to load."); }
@@ -555,14 +594,23 @@ export default function RatingsPage() {
   };
 
   const openByTitle = async (title: string) => {
+    // FIX #13: search bar wasn't updated when clicking a top-list card — the input
+    // showed whatever was typed before (or stayed empty). selectTitle updates it
+    // when a suggestion is chosen; openByTitle must do the same.
+    setQuery(title);
     setLoading(true); setDetail(null); setError(""); setBrowseResults([]);
     try {
       const r = await fetch(`${API}/search/titles?query=${encodeURIComponent(title)}&limit=5`);
       const j = await r.json();
       const first: SearchResult|undefined = j.titles?.[0];
       if (first) { await selectTitle(first.id, first.primaryTitle); }
-      else { setError("Not found on IMDb."); setLoading(false); }
-    } catch { setError("Search failed."); setLoading(false); }
+      else { setError("Not found on IMDb."); }
+    } catch { setError("Search failed."); }
+    // FIX #14: loading state previously relied entirely on the inner selectTitle call to
+    // reset it. If the title wasn't found (else branch) or the fetch threw (catch branch),
+    // the manual setLoading(false) calls were easy to miss or forget. Using finally
+    // guarantees cleanup on every exit path.
+    finally { setLoading(false); }
   };
 
   const doSearch = async () => {
@@ -583,36 +631,40 @@ export default function RatingsPage() {
     setSuggestions([]); setShowSug(false); setBrowseResults([]);
   };
 
-  const maxEps = seasons.length ? Math.max(...seasons.map(s => (episodes[s.season]??[]).length)) : 0;
-  const seasonAvg = seasons.map(s => {
+  // FIX #9 (cont): derive displaySeasons here so the grid never renders more than
+  // MAX_DISPLAY_SEASONS columns, and maxEps / seasonAvg match the capped slice.
+  const displaySeasons = seasons.slice(0, MAX_DISPLAY_SEASONS);
+  const maxEps = displaySeasons.length ? Math.max(...displaySeasons.map(s => (episodes[s.season]??[]).length)) : 0;
+  const seasonAvg = displaySeasons.map(s => {
     const eps = (episodes[s.season]??[]).filter(e => e.rating?.aggregateRating);
     if (!eps.length) return null;
     return +(eps.reduce((a,e) => a+(e.rating?.aggregateRating??0), 0)/eps.length).toFixed(1);
   });
+
   const CELL = 60, ROW_LABEL = 48;
   const isEmptyState = !detail && !loading && browseResults.length === 0 && !browsing;
   const visibleMovies: RatedMovieItem[] = (() => {
     const posterBackedTmdb = topMovies.filter((item) => hasPoster(item));
     if (posterBackedTmdb.length >= MIN_TOP_ITEMS) return posterBackedTmdb;
-    // Show ALL fallback items (emoji placeholder shown for those without poster)
     return mergePosterBackedItems<RatedMovieItem>(posterBackedTmdb, fallbackMovies);
   })();
   const visibleTv: RatedTvItem[] = (() => {
     const posterBackedTmdb = topTv.filter((item) => hasPoster(item));
     if (posterBackedTmdb.length >= MIN_TOP_ITEMS) return posterBackedTmdb;
-    // Show ALL fallback items (emoji placeholder shown for those without poster)
     return mergePosterBackedItems<RatedTvItem>(posterBackedTmdb, fallbackTv);
   })();
   const visibleAnime = topAnime.length > 0 ? topAnime : fallbackAnime;
-  const [movieVisibleCount, setMovieVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
-  const [tvVisibleCount, setTvVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
-  const ratingsScrollRef = useRef<HTMLDivElement | null>(null);
 
+  // FIX #12 (cont): reset all three tab counters when switching tabs.
   useEffect(() => {
     setMovieVisibleCount(INITIAL_VISIBLE_COUNT);
     setTvVisibleCount(INITIAL_VISIBLE_COUNT);
+    // FIX #5 (cont): anime count was never reset on tab switch.
+    setAnimeVisibleCount(INITIAL_VISIBLE_COUNT);
   }, [activeTab]);
 
+  // FIX #5 (cont): scroll handler now handles anime tab, and visibleAnime.length
+  // is included in deps so the cap stays accurate when the anime list loads.
   useEffect(() => {
     const node = ratingsScrollRef.current;
     if (!node) return;
@@ -622,11 +674,14 @@ export default function RatingsPage() {
         setMovieVisibleCount((current) => Math.min(current + VISIBLE_INCREMENT, visibleMovies.length));
       } else if (activeTab === "tv") {
         setTvVisibleCount((current) => Math.min(current + VISIBLE_INCREMENT, visibleTv.length));
+      } else if (activeTab === "anime") {
+        // FIX #5: anime case was missing — all items rendered at once regardless of list size.
+        setAnimeVisibleCount((current) => Math.min(current + VISIBLE_INCREMENT, visibleAnime.length));
       }
     };
     node.addEventListener("scroll", onScroll);
     return () => node.removeEventListener("scroll", onScroll);
-  }, [activeTab, visibleMovies.length, visibleTv.length]);
+  }, [activeTab, visibleMovies.length, visibleTv.length, visibleAnime.length]);
 
   const RatingBadge = ({ r, source="TMDB" }: { r: number; source?: string }) => (
     <div style={{ position:"absolute", bottom:6, right:6, background:getRatingColor(r), color:"#fff", fontSize:10, fontWeight:700, borderRadius:4, padding:"2px 6px", display:"flex", flexDirection:"column", alignItems:"center", lineHeight:1.2 }}>
@@ -831,12 +886,18 @@ export default function RatingsPage() {
                   ) : null}
                 </div>
 
-                {/* IMDb link */}
-                <div>
+                {/* IMDb link + FIX #2: RatingButtons wired in for movie detail */}
+                <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
                   <button onClick={() => window.open(`https://www.imdb.com/title/${detail.id}`,"_blank")}
                     style={{ background:"var(--accent)", border:"none", borderRadius:"var(--radius-sm)", padding:"9px 20px", color:"var(--text-on-accent)", cursor:"pointer", fontWeight:600, fontSize:13, fontFamily:"var(--font)" }}>
                     Open on IMDb ↗
                   </button>
+                  <RatingButtons
+                    id={detail.id}
+                    kind="movie"
+                    title={detail.primaryTitle}
+                    poster={detail.primaryImage?.url}
+                  />
                 </div>
               </div>
             </div>
@@ -872,6 +933,13 @@ export default function RatingsPage() {
                     <span style={{ fontSize:11, color:"var(--text-secondary)", lineHeight:1.6 }}>/ 10<br />{fmt(detail.rating.voteCount)} votes</span>
                   </div>
                 )}
+                {/* FIX #2: RatingButtons wired in for TV series detail */}
+                <RatingButtons
+                  id={detail.id}
+                  kind="tv"
+                  title={detail.primaryTitle}
+                  poster={detail.primaryImage?.url}
+                />
                 {detail.metacritic?.score != null && (
                   <div style={{ background:detail.metacritic.score>=60?"var(--accent-subtle)":"rgba(185,28,28,0.1)", border:`1px solid ${detail.metacritic.score>=60?"var(--success)":"var(--danger)"}`, color:detail.metacritic.score>=60?"var(--text-success)":"var(--text-danger)", borderRadius:"var(--radius-sm)", padding:"6px 12px", fontWeight:700, fontSize:13 }}>
                     🎯 Metacritic: {detail.metacritic.score}
@@ -901,16 +969,22 @@ export default function RatingsPage() {
                   </div>
                 </div>
                 {loadingGrid && <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>{Array.from({length:20},(_,i)=><div key={i} className="rat-skeleton" style={{ width:54, height:40, borderRadius:8 }} />)}</div>}
-                {seasons.length>0 && !loadingGrid && (
+                {/* FIX #9: show a note if the show has more seasons than the display cap */}
+                {seasons.length > MAX_DISPLAY_SEASONS && !loadingGrid && (
+                  <div style={{ fontSize:11, color:"var(--text-muted)", marginBottom:10, padding:"6px 10px", background:"var(--bg-surface)", borderRadius:"var(--radius-sm)", border:"1px solid var(--border)" }}>
+                    Showing first {MAX_DISPLAY_SEASONS} of {seasons.length} seasons to keep the grid usable.
+                  </div>
+                )}
+                {displaySeasons.length>0 && !loadingGrid && (
                   <div className="rat-grid" style={{ overflowX:"auto" }}>
                     <div style={{ display:"inline-block", minWidth:"max-content" }}>
                       <div style={{ display:"flex", marginBottom:6, paddingLeft:ROW_LABEL }}>
-                        {seasons.map(s => <div key={s.season} style={{ width:CELL, textAlign:"center", fontSize:11, fontWeight:700, color:"var(--text-accent)", flexShrink:0 }}>S{s.season}</div>)}
+                        {displaySeasons.map(s => <div key={s.season} style={{ width:CELL, textAlign:"center", fontSize:11, fontWeight:700, color:"var(--text-accent)", flexShrink:0 }}>S{s.season}</div>)}
                       </div>
                       {Array.from({length:maxEps},(_,epIdx) => (
                         <div key={epIdx} style={{ display:"flex", alignItems:"center", marginBottom:3 }}>
                           <div style={{ width:ROW_LABEL, fontSize:11, color:"var(--text-muted)", fontWeight:600, flexShrink:0 }}>E{epIdx+1}</div>
-                          {seasons.map(s => {
+                          {displaySeasons.map(s => {
                             const ep = (episodes[s.season]??[])[epIdx];
                             const rating = ep?.rating?.aggregateRating??null;
                             return (
@@ -951,7 +1025,7 @@ export default function RatingsPage() {
       {isEmptyState && (
         <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
           <div style={{ display:"flex", borderBottom:"1px solid var(--border)", flexShrink:0, paddingLeft:20, alignItems:"center" }}>
-            {([ {key:"movies",label:"🎬 Top Rated Movies"}, {key:"tv",label:"📺 Top Rated Series"}, {key:"anime",label:"✨ Top Rated Animes"} ] as {key:TopTab;label:string}[]).map(tab => (
+            {([ {key:"movies",label:"🎬 Top Rated Movies"}, {key:"tv",label:"📺 Top Rated Series"}, {key:"anime",label:"✨ Top Rated Anime"} ] as {key:TopTab;label:string}[]).map(tab => (
               <button key={tab.key}
                 className={`rat-tab${activeTab===tab.key?" active":""}`}
                 onClick={() => setActiveTab(tab.key)}
@@ -1033,7 +1107,9 @@ export default function RatingsPage() {
               <>
                 <div style={{ fontSize:12, color:"var(--text-muted)", marginBottom:12 }}>{visibleAnime.length} Top Ranked Anime · {topAnime.length > 0 ? "MyAnimeList" : "MovieBox"}</div>
                 <div className="rat-grid" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(144px,1fr))", gap:12 }}>
-                  {visibleAnime.map((a,i) => (
+                  {/* FIX #5: was visibleAnime.map(...) — rendered all items at once.
+                      Now uses animeVisibleCount slice, same as movies and TV. */}
+                  {visibleAnime.slice(0, animeVisibleCount).map((a,i) => (
                     <div key={"mal_id" in a ? a.mal_id : a.id} className="rat-card"
                       style={{ animationDelay:`${(i%25)*0.02}s`, background:"var(--bg-surface)", border:"1px solid var(--border)", borderRadius:"var(--radius-md)", overflow:"hidden" }}
                       onClick={() => openByTitle(a.title)}>
@@ -1042,7 +1118,8 @@ export default function RatingsPage() {
                           ? <img src={a.images.jpg.large_image_url} alt={a.title} style={{ width:"100%", aspectRatio:"2/3", objectFit:"cover", display:"block" }} />
                           : a.poster
                             ? <img src={a.poster} alt={a.title} style={{ width:"100%", aspectRatio:"2/3", objectFit:"cover", display:"block" }} />
-                            : <div style={{ width:"100%", aspectRatio:"2/3", background:"var(--bg-surface2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32 }}>âœ¨</div>}
+                            // FIX #3: was "âœ¨" — corrupted UTF-8 encoding of the ✨ emoji.
+                            : <div style={{ width:"100%", aspectRatio:"2/3", background:"var(--bg-surface2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32 }}>✨</div>}
                         <div style={{ position:"absolute", top:6, left:6, background:"rgba(0,0,0,0.75)", color:"#fff", fontSize:10, fontWeight:700, borderRadius:4, padding:"2px 6px" }}>#{i+1}</div>
                         {a.score>0 && <RatingBadge r={a.score} />}
                       </div>
@@ -1062,7 +1139,15 @@ export default function RatingsPage() {
 
       {/* Tooltip */}
       {tooltip && (
-        <div style={{ position:"fixed", top:tooltip.y-100, left:tooltip.x+14, background:"var(--bg-surface)", border:"1px solid var(--border)", borderRadius:"var(--radius-md)", padding:"9px 13px", fontSize:12, color:"var(--text-primary)", pointerEvents:"none", zIndex:999, maxWidth:270, boxShadow:"var(--shadow-lg)", animation:"rat-fadeIn 0.1s ease" }}>
+        // FIX #6: was fixed at (tooltip.y - 100, tooltip.x + 14) with no boundary check.
+        // Near the top or right screen edge the tooltip clipped outside the viewport.
+        // Math.min/max clamps it so it stays fully visible.
+        <div style={{
+          position:"fixed",
+          top: Math.min(Math.max(tooltip.y - 100, 8), window.innerHeight - 160),
+          left: Math.min(tooltip.x + 14, window.innerWidth - 290),
+          background:"var(--bg-surface)", border:"1px solid var(--border)", borderRadius:"var(--radius-md)", padding:"9px 13px", fontSize:12, color:"var(--text-primary)", pointerEvents:"none", zIndex:999, maxWidth:270, boxShadow:"var(--shadow-lg)", animation:"rat-fadeIn 0.1s ease"
+        }}>
           <div style={{ fontWeight:700, marginBottom:2 }}>S{tooltip.ep.season} E{tooltip.ep.episodeNumber} — {tooltip.ep.title}</div>
           <div style={{ color:"var(--text-accent)", fontWeight:600 }}>⭐ {tooltip.ep.rating?.aggregateRating??"No rating"}{tooltip.ep.rating?.voteCount?` · ${fmt(tooltip.ep.rating.voteCount)} votes`:""}</div>
           {tooltip.ep.plot && <div style={{ marginTop:4, color:"var(--text-muted)", fontSize:11, lineHeight:1.55 }}>{tooltip.ep.plot.slice(0,120)}{tooltip.ep.plot.length>120?"…":""}</div>}
