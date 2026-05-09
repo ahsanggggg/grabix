@@ -28,7 +28,6 @@ import { markPerf, measurePerf } from "./lib/performance";
 import { fetchMovieBoxDiscover } from "./lib/streamProviders";
 import "./index.css";
 
-const HomePage = lazy(() => import("./pages/HomePage"));
 const DownloaderPage = lazy(() => import("./pages/DownloaderPage"));
 const ConverterPage = lazy(() => import("./pages/ConverterPage"));
 const LibraryPage = lazy(() => import("./pages/LibraryPage"));
@@ -52,11 +51,11 @@ function Inner() {
   const [page, setPage] = useState<Page>(() => {
     const saved = localStorage.getItem("grabix:last-page") as Page | null;
     const valid: Page[] = [
-      "home", "downloader", "converter", "library", "manga", "movies",
+      "downloader", "converter", "library", "manga", "movies",
       "moviebox", "series", "favorites", "ratings", "settings", "topimdb",
       "continuewatching", "recentlyadded", "watchhistory",
     ];
-    return saved && valid.includes(saved) ? saved : "home";
+    return saved && valid.includes(saved) ? saved : "moviebox";
   });
   const [genrePageParams, setGenrePageParams] = useState<{ mediaType: "movie" | "tv"; genreId: number; genreName: string } | null>(null);
   const [_pageRevision, setPageRevision] = useState(0);
@@ -305,11 +304,6 @@ function Inner() {
   }, [genrePageParams]);
 
   const pages = useMemo<Record<Page, ReactNode>>(() => ({
-    home: (
-      <ErrorBoundary section="Home">
-        <HomePage />
-      </ErrorBoundary>
-    ),
     downloader: (
       <ErrorBoundary section="Downloader">
         <DownloaderPage onDownloadStarting={stableOnDownloadStarting} />

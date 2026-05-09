@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useRuntimeHealth } from "../context/RuntimeHealthContext";
 import {
   fetchMovieBoxDetails,
@@ -72,7 +72,10 @@ export default function MovieBoxPage() {
   const [player, setPlayer] = useState<PlayerState | null>(null);
 
   const isSearchMode = query.trim().length > 0;
-  const filteredResults = filterAdultContent(results, adultContentBlocked);
+  const filteredResults = useMemo(
+    () => filterAdultContent(results, adultContentBlocked),
+    [results, adultContentBlocked]
+  );
 
   const loadDiscover = async () => {
     setLoading(true);
@@ -159,7 +162,7 @@ export default function MovieBoxPage() {
     setQuery(next);
   };
 
-  const sectionsToRender = (filter === "all"
+  const sectionsToRender = useMemo(() => (filter === "all"
     ? discover
     : discover.filter((section) => {
         if (filter === "hindi") return section.id === "hindi";
@@ -169,7 +172,9 @@ export default function MovieBoxPage() {
         return true;
       }))
     .map((section) => ({ ...section, items: filterAdultContent(section.items, adultContentBlocked) }))
-    .filter((section) => section.items.length > 0);
+    .filter((section) => section.items.length > 0),
+    [discover, filter, adultContentBlocked]
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
@@ -308,7 +313,7 @@ export default function MovieBoxPage() {
   );
 }
 
-function MediaGrid({ items, onOpen }: { items: MovieBoxItem[]; onOpen: (item: MovieBoxItem) => void }) {
+const MediaGrid = memo(function MediaGrid({ items, onOpen }: { items: MovieBoxItem[]; onOpen: (item: MovieBoxItem) => void }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: 14 }}>
       {items.map((item) => (
@@ -350,7 +355,7 @@ function MediaGrid({ items, onOpen }: { items: MovieBoxItem[]; onOpen: (item: Mo
       ))}
     </div>
   );
-}
+});
 
 function MovieBoxDetail({
   item,
@@ -584,6 +589,10 @@ function MovieBoxDetail({
       setPlayOptionsError("");
       return;
     }
+    // Wait for the resolvedSources effect to finish first.
+    // If we called loadSources() here too, we'd have two parallel calls racing
+    // each other, which causes the player to receive conflicting source data.
+    if (resolvedSources.length === 0) return;
     let cancelled = false;
     const run = async () => {
       setPlayOptionsLoading(true);

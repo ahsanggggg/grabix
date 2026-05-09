@@ -70,7 +70,7 @@ const IconHome = ({ size = 16, color = "currentColor" }: { size?: number; color?
 );
 
 export type Page =
-  "home" | "downloader" | "converter" | "library" | "manga" | "movies" | "moviebox" | "series" | "favorites" | "ratings" | "settings" | "topimdb" | "continuewatching" | "recentlyadded" | "genrepage" | "watchhistory";
+  "downloader" | "converter" | "library" | "manga" | "movies" | "moviebox" | "series" | "favorites" | "ratings" | "settings" | "topimdb" | "continuewatching" | "recentlyadded" | "genrepage" | "watchhistory";
 
 interface Props {
   page: Page;
@@ -84,7 +84,6 @@ const GROUPS = [
   {
     label: "Tools",
     items: [
-      { id: "home" as Page, label: "Home", Icon: IconHome },
       { id: "downloader" as Page, label: "Downloader", Icon: IconDownload },
       { id: "converter" as Page, label: "Converter", Icon: IconConvert },
       { id: "library" as Page, label: "Library", Icon: IconLibrary },
