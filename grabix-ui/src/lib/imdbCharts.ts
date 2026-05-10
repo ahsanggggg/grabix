@@ -67,7 +67,7 @@ async function fetchImdbChart(path: string): Promise<ImdbChartItem[]> {
     const chart = path.split("/").pop() || "";
     const data = await getCachedJson<Record<string, unknown>>({
       key: `metadata:imdb:chart:${chart}`,
-      url: `${BACKEND_API}/metadata/imdb/chart?chart=${encodeURIComponent(chart)}`,
+      url: `${BACKEND_API}/imdb/chart?chart=${encodeURIComponent(chart)}`,
       ttlMs: 300_000,
       scope: "session",
       mapError: async () => "IMDb metadata unavailable",

@@ -6,10 +6,9 @@ import { getImdbTop250MovieChart, getImdbTop250TvChart } from "../lib/imdbCharts
 import { RatingButtons } from "../components/shared/RatingButtons";
 import { BACKEND_API } from "../lib/api";
 
-// FIX #15: was "https://api.imdbapi.dev" — called directly from browser, causing
-// "Search failed" / "Not found on IMDb" when the external API is slow or blocked.
-// All IMDb calls now go through the local backend which proxies them server-side.
-const API        = `${BACKEND_API}/metadata/imdb`;
+// The metadata router is mounted WITHOUT a prefix on the backend — routes live at
+// /imdb/... and /tmdb/... directly, not /metadata/imdb/...
+const API        = `${BACKEND_API}/imdb`;
 const JIKAN      = "https://api.jikan.moe/v4";
 
 interface SearchResult {
@@ -603,10 +602,31 @@ export default function RatingsPage() {
     // when a suggestion is chosen; openByTitle must do the same.
     setQuery(title);
     setLoading(true); setDetail(null); setError(""); setBrowseResults([]);
-    try {
-      const r = await fetch(`${API}/search?query=${encodeURIComponent(title)}&limit=5`);
+
+    // Helper: search and pick the best matching result.
+    // Prefers an exact case-insensitive title match; falls back to first result.
+    const trySearch = async (q: string): Promise<SearchResult | undefined> => {
+      const r = await fetch(`${API}/search?query=${encodeURIComponent(q)}&limit=10`);
       const j = await r.json();
-      const first: SearchResult|undefined = j.titles?.[0];
+      const titles: SearchResult[] = j.titles ?? [];
+      return (
+        titles.find(t => t.primaryTitle?.toLowerCase() === title.toLowerCase()) ||
+        titles[0]
+      );
+    };
+
+    try {
+      let first = await trySearch(title);
+      // If nothing came back, retry with a cleaned query (removes curly apostrophes,
+      // colons, etc. that can trip up the IMDb search API).
+      if (!first) {
+        const cleaned = title
+          .replace(/[\u2018\u2019\u201A\u201B]/g, "'") // curly → straight apostrophe
+          .replace(/[^a-zA-Z0-9 ']/g, " ")             // remove special chars except apostrophe
+          .replace(/\s+/g, " ")
+          .trim();
+        if (cleaned !== title) first = await trySearch(cleaned);
+      }
       if (first) { await selectTitle(first.id, first.primaryTitle); }
       else { setError("Not found on IMDb."); }
     } catch { setError("Search failed."); }
@@ -797,13 +817,15 @@ export default function RatingsPage() {
               <div key={r.id} className="rat-card"
                 style={{ animationDelay:`${i*0.025}s`, background:"var(--bg-surface)", border:"1px solid var(--border)", borderRadius:"var(--radius-md)", overflow:"hidden" }}
                 onClick={() => selectTitle(r.id, r.primaryTitle)}>
-                {r.primaryImage?.url
-                  ? <img src={r.primaryImage.url} alt={r.primaryTitle} style={{ width:"100%", aspectRatio:"2/3", objectFit:"cover", display:"block" }} />
-                  : <div style={{ width:"100%", aspectRatio:"2/3", background:"var(--bg-surface2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32 }}>🎬</div>}
+                <div style={{ position:"relative" }}>
+                  {r.primaryImage?.url
+                    ? <img src={r.primaryImage.url} alt={r.primaryTitle} style={{ width:"100%", aspectRatio:"2/3", objectFit:"cover", display:"block" }} />
+                    : <div style={{ width:"100%", aspectRatio:"2/3", background:"var(--bg-surface2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32 }}>🎬</div>}
+                  {r.rating && r.rating.aggregateRating > 0 && <RatingBadge r={r.rating.aggregateRating} source="IMDb" />}
+                </div>
                 <div style={{ padding:"8px 10px" }}>
                   <div style={{ fontSize:12, fontWeight:700, marginBottom:2, lineHeight:1.3 }}>{r.primaryTitle}</div>
-                  <div style={{ fontSize:11, color:"var(--text-muted)" }}>{r.startYear}{r.endYear?`–${r.endYear}`:""}</div>
-                  {r.rating && <div style={{ fontSize:11, color:"var(--text-accent)", marginTop:3, fontWeight:600 }}>⭐ {r.rating.aggregateRating} <span style={{ color:"var(--text-muted)", fontWeight:400 }}>({fmt(r.rating.voteCount)})</span></div>}
+                  <div style={{ fontSize:11, color:"var(--text-muted)" }}>{r.startYear}{r.endYear?`–${r.endYear}`:""} · {r.type.replace(/_/g," ")}</div>
                 </div>
               </div>
             ))}
