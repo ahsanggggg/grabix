@@ -560,8 +560,12 @@ def _download_worker(dl_id: str) -> None:
 
             if engine == "aria2" and _has_aria2 and _has_aria2():
                 _run_aria2(dl_id, item, pause_ev, cancel_ev)
-            elif dl_type == "subtitle" or _is_direct_subtitle_url(item.get("url", "")):
+            elif _is_direct_subtitle_url(item.get("url", "")):
                 _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="subtitle")
+            elif dl_type == "subtitle":
+                # Site URLs (YouTube, Vimeo, etc.) need yt-dlp to extract subtitle tracks.
+                # Plain .srt/.vtt/.ass links are already handled by _is_direct_subtitle_url above.
+                _run_ytdlp(dl_id, item, pause_ev, cancel_ev)
             elif _is_direct_media_url(item.get("url", "")) and item.get("force_hls") is False:
                 _run_direct_download(dl_id, item, pause_ev, cancel_ev, expected_type="media")
             elif dl_type == "thumbnail":
@@ -645,6 +649,47 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
     custom_headers = item.get("custom_headers") or {}
     force_hls = item.get("force_hls", False)
     ffmpeg_path = _resolve_tool_binary("ffmpeg", ["ffmpeg.exe", "ffmpeg"])
+
+    # ── Subtitle download (skip video, write .srt/.vtt via yt-dlp) ────────────
+    if dl_type == "subtitle":
+        subtitle_lang = (item.get("subtitle_lang") or "en").strip() or "en"
+        outtmpl = str(dl_dir / "%(title).100s [%(id)s].%(ext)s")
+        sub_opts: dict[str, Any] = {
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": [subtitle_lang, f"{subtitle_lang}-*"],
+            "subtitlesformat": "srt/vtt/best",
+            "outtmpl": outtmpl,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+        }
+        if custom_headers:
+            sub_opts["http_headers"] = custom_headers
+        _downloads[dl_id].update({
+            "can_pause": False,
+            "progress_mode": "activity",
+            "stage_label": "Fetching subtitle…",
+        })
+        with ytdl.YoutubeDL(sub_opts) as ydl:
+            if dl_id in _download_controls:
+                _download_controls[dl_id]["ydl_ref"] = ydl
+            info = ydl.extract_info(item["url"], download=True)
+            if dl_id in _download_controls:
+                _download_controls[dl_id]["ydl_ref"] = None
+        # Find the subtitle file yt-dlp just wrote (newest .srt/.vtt/.ass in dl_dir)
+        sub_exts = {".srt", ".vtt", ".ass", ".ssa"}
+        candidates = sorted(
+            [f for f in dl_dir.iterdir() if f.suffix.lower() in sub_exts],
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            _downloads[dl_id]["file_path"] = str(candidates[0])
+        elif info:
+            _downloads[dl_id]["file_path"] = ydl.prepare_filename(info)
+        return
 
     # ── Format selector ───────────────────────────────────────────────────────
     if dl_type == "audio":
@@ -978,6 +1023,21 @@ def _run_direct_download(
                     "total": _fmt_bytes(total) if total else "",
                     "progress_mode": "determinate" if total else "activity",
                 })
+
+    # Safety: reject HTML pages masquerading as subtitle/media files
+    if expected_type == "subtitle":
+        try:
+            with open(out_path, "rb") as _f:
+                _head = _f.read(512).lstrip()
+            if _head.lower().startswith(b"<!doctype") or _head.lower().startswith(b"<html"):
+                out_path.unlink(missing_ok=True)
+                raise ValueError(
+                    "The server returned an HTML page instead of a subtitle file. "
+                    "Paste this URL in the Downloader as a Video or Audio type so yt-dlp can extract it, "
+                    "or find a direct .srt/.vtt link."
+                )
+        except OSError:
+            pass
 
     _downloads[dl_id]["file_path"] = str(out_path)
     _downloads[dl_id]["partial_file_path"] = ""
