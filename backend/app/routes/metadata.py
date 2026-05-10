@@ -16,7 +16,8 @@ from app.services.tmdb import (
     fetch_airing_today,
     fetch_watch_providers,
 )
-from app.services.imdb import fetch_imdb_chart
+from urllib.parse import quote
+from app.services.imdb import fetch_imdb_chart, fetch_imdb_json
 
 router = APIRouter()
 
@@ -66,6 +67,50 @@ async def tmdb_tv_season_map(
 @router.get("/imdb/chart")
 async def imdb_chart(chart: str = Query(..., min_length=1)):
     return await fetch_imdb_chart(chart_name=chart)
+
+
+@router.get("/imdb/search")
+async def imdb_search(query: str = Query(..., min_length=1), limit: int = Query(5, ge=1, le=20)):
+    """Proxy for imdbapi.dev /search/titles — normalizes response key to always be 'titles'."""
+    data = await fetch_imdb_json(f"/search/titles?query={quote(query)}&limit={limit}")
+    # imdbapi.dev returns results under different keys across API versions
+    if isinstance(data, list):
+        titles = data
+    else:
+        titles = (
+            data.get("titles")
+            or data.get("results")
+            or data.get("items")
+            or data.get("data")
+            or []
+        )
+    return {"titles": titles}
+
+
+@router.get("/imdb/title/{imdb_id}")
+async def imdb_title(imdb_id: str):
+    """Proxy for imdbapi.dev /titles/{id}."""
+    return await fetch_imdb_json(f"/titles/{imdb_id}")
+
+
+@router.get("/imdb/title/{imdb_id}/seasons")
+async def imdb_seasons(imdb_id: str):
+    """Proxy for imdbapi.dev /titles/{id}/seasons."""
+    return await fetch_imdb_json(f"/titles/{imdb_id}/seasons")
+
+
+@router.get("/imdb/title/{imdb_id}/episodes")
+async def imdb_episodes(
+    imdb_id: str,
+    season: str = Query(...),
+    pageSize: int = Query(50, ge=1, le=250),
+    pageToken: str = Query(""),
+):
+    """Proxy for imdbapi.dev /titles/{id}/episodes."""
+    path = f"/titles/{imdb_id}/episodes?season={season}&pageSize={pageSize}"
+    if pageToken:
+        path += f"&pageToken={quote(pageToken)}"
+    return await fetch_imdb_json(path)
 
 
 # ── New Netflix-style endpoints ───────────────────────────────────────────────

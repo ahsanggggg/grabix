@@ -4,8 +4,12 @@ import { fetchMovieBoxDiscover, type MovieBoxItem } from "../lib/streamProviders
 import { getImdbTop250MovieChart, getImdbTop250TvChart } from "../lib/imdbCharts";
 // FIX #2: RatingButtons was built but never imported — user ratings were completely disconnected
 import { RatingButtons } from "../components/shared/RatingButtons";
+import { BACKEND_API } from "../lib/api";
 
-const API        = "https://api.imdbapi.dev";
+// FIX #15: was "https://api.imdbapi.dev" — called directly from browser, causing
+// "Search failed" / "Not found on IMDb" when the external API is slow or blocked.
+// All IMDb calls now go through the local backend which proxies them server-side.
+const API        = `${BACKEND_API}/metadata/imdb`;
 const JIKAN      = "https://api.jikan.moe/v4";
 
 interface SearchResult {
@@ -364,7 +368,7 @@ export default function RatingsPage() {
 
   const fetchCanonicalTopList = useCallback(async (entries: CanonicalTitle[]): Promise<MovieBoxItem[]> => {
     const settled = await Promise.allSettled(entries.map(async (entry) => {
-      const response = await fetch(`${API}/search/titles?query=${encodeURIComponent(entry.title)}&limit=10`);
+      const response = await fetch(`${API}/search?query=${encodeURIComponent(entry.title)}&limit=10`);
       const payload = await response.json();
       const titles: SearchResult[] = payload.titles ?? [];
       const picked =
@@ -540,7 +544,7 @@ export default function RatingsPage() {
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(async () => {
       try {
-        const r = await fetch(`${API}/search/titles?query=${encodeURIComponent(query)}&limit=8`);
+        const r = await fetch(`${API}/search?query=${encodeURIComponent(query)}&limit=8`);
         const j = await r.json();
         // FIX #7: filterType was applied to full search results but NOT to autocomplete suggestions.
         // Typing "Inception" with filter set to "TV Series" would still show movie results in the
@@ -559,12 +563,12 @@ export default function RatingsPage() {
     setLoading(true);
     setDetail(null); setSeasons([]); setEpisodes({}); setError(""); setBrowseResults([]);
     try {
-      const r = await fetch(`${API}/titles/${id}`);
+      const r = await fetch(`${API}/title/${id}`);
       if (!r.ok) throw new Error("Not found");
       const d: TitleDetail = await r.json();
       setDetail(d);
       if (IS_SERIES(d.type)) {
-        const sr = await fetch(`${API}/titles/${id}/seasons`);
+        const sr = await fetch(`${API}/title/${id}/seasons`);
         const sj = await sr.json();
         const seas: SeasonData[] = sj.seasons ?? [];
         setSeasons(seas); setLoadingGrid(true);
@@ -578,7 +582,7 @@ export default function RatingsPage() {
           await Promise.all(batch.map(async (s) => {
             let all: EpisodeData[] = [], token = "";
             do {
-              const url = `${API}/titles/${id}/episodes?season=${s.season}&pageSize=50${token?`&pageToken=${token}`:""}`;
+              const url = `${API}/title/${id}/episodes?season=${s.season}&pageSize=50${token?`&pageToken=${token}`:""}`;
               const ej = await (await fetch(url)).json();
               all = all.concat(ej.episodes ?? []); token = ej.nextPageToken ?? "";
             } while (token);
@@ -600,7 +604,7 @@ export default function RatingsPage() {
     setQuery(title);
     setLoading(true); setDetail(null); setError(""); setBrowseResults([]);
     try {
-      const r = await fetch(`${API}/search/titles?query=${encodeURIComponent(title)}&limit=5`);
+      const r = await fetch(`${API}/search?query=${encodeURIComponent(title)}&limit=5`);
       const j = await r.json();
       const first: SearchResult|undefined = j.titles?.[0];
       if (first) { await selectTitle(first.id, first.primaryTitle); }
@@ -617,13 +621,26 @@ export default function RatingsPage() {
     if (!query.trim()) return;
     setShowSug(false); setBrowsing(true); setDetail(null); setError("");
     try {
-      const r = await fetch(`${API}/search/titles?query=${encodeURIComponent(query.trim())}&limit=20`);
+      const r = await fetch(`${API}/search?query=${encodeURIComponent(query.trim())}&limit=20`);
       const j = await r.json();
       let results: SearchResult[] = j.titles ?? [];
       if (filterType !== "ALL") results = results.filter(t => t.type === filterType);
       setBrowseResults(results);
     } catch { setError("Search failed."); }
     setBrowsing(false);
+  };
+
+  // FIX #15: cards that come from the IMDb Top 250 chart already have an IMDb ID
+  // (e.g. "tt0111161"). Calling openByTitle() was doing a redundant title search
+  // that failed with "Not found on IMDb" or "Search failed" due to API errors.
+  // If the id already starts with "tt", go directly to selectTitle().
+  const handleCardClick = (id: string | number, title: string) => {
+    const sid = String(id);
+    if (sid.startsWith("tt")) {
+      selectTitle(sid, title);
+    } else {
+      openByTitle(title);
+    }
   };
 
   const goBack = () => {
@@ -1050,7 +1067,7 @@ export default function RatingsPage() {
                   {visibleMovies.slice(0, movieVisibleCount).map((m,i) => (
                     <div key={"id" in m ? m.id : i} className="rat-card"
                       style={{ animationDelay:`${(i%20)*0.03}s`, background:"var(--bg-surface)", border:"1px solid var(--border)", borderRadius:"var(--radius-md)", overflow:"hidden" }}
-                      onClick={() => openByTitle(m.title)}>
+                      onClick={() => handleCardClick(m.id, m.title)}>
                       <div style={{ position:"relative" }}>
                         {"poster_path" in m && m.poster_path
                           ? <img src={`${IMG_BASE}${m.poster_path}`} alt={m.title} style={{ width:"100%", aspectRatio:"2/3", objectFit:"cover", display:"block" }} />
@@ -1080,7 +1097,7 @@ export default function RatingsPage() {
                   {visibleTv.slice(0, tvVisibleCount).map((s,i) => (
                     <div key={"id" in s ? s.id : i} className="rat-card"
                       style={{ animationDelay:`${(i%20)*0.03}s`, background:"var(--bg-surface)", border:"1px solid var(--border)", borderRadius:"var(--radius-md)", overflow:"hidden" }}
-                      onClick={() => openByTitle("name" in s ? s.name : s.title)}>
+                      onClick={() => handleCardClick(s.id, "name" in s ? s.name : s.title)}>
                       <div style={{ position:"relative" }}>
                         {"poster_path" in s && s.poster_path
                           ? <img src={`${IMG_BASE}${s.poster_path}`} alt={s.name} style={{ width:"100%", aspectRatio:"2/3", objectFit:"cover", display:"block" }} />
