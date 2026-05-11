@@ -659,12 +659,20 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             "writesubtitles": True,
             "writeautomaticsub": True,
             "subtitleslangs": [subtitle_lang, f"{subtitle_lang}-*"],
-            "subtitlesformat": "srt/vtt/best",
+            "subtitlesformat": "vtt/srt/best",  # vtt first — reliable without ffmpeg
             "outtmpl": outtmpl,
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
+            "socket_timeout": 30,  # prevent hanging forever on slow/broken connections
+            "extractor_retries": 5,        # retry up to 5x on 429 / transient errors
+            "sleep_interval_requests": 3,  # wait 3 s between each YouTube API request
+            "sleep_interval": 3,           # wait 3 s before first retry
+            "max_sleep_interval": 15,      # cap exponential backoff at 15 s
         }
+        # Pass bundled ffmpeg to yt-dlp so it can convert subtitle formats
+        if ffmpeg_path:
+            sub_opts["ffmpeg_location"] = str(Path(ffmpeg_path).parent)
         if custom_headers:
             sub_opts["http_headers"] = custom_headers
         _downloads[dl_id].update({
@@ -672,23 +680,55 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             "progress_mode": "activity",
             "stage_label": "Fetching subtitle…",
         })
-        with ytdl.YoutubeDL(sub_opts) as ydl:
-            if dl_id in _download_controls:
-                _download_controls[dl_id]["ydl_ref"] = ydl
-            info = ydl.extract_info(item["url"], download=True)
-            if dl_id in _download_controls:
-                _download_controls[dl_id]["ydl_ref"] = None
-        # Find the subtitle file yt-dlp just wrote (newest .srt/.vtt/.ass in dl_dir)
+        # FIX: snapshot time before download so we only pick up files created NOW,
+        # not old subtitle files already sitting in the downloads folder.
         sub_exts = {".srt", ".vtt", ".ass", ".ssa"}
+        download_started_at = time.time() - 2  # 2-second buffer for filesystem lag
+
+        # yt-dlp has native cookie support — try each browser in order.
+        # Logged-in browser cookies bypass YouTube's 429 rate limiting.
+        _cookie_browsers = ["chrome", "edge", "firefox", "brave", "chromium", "opera"]
+        info = None
+        last_exc: Exception | None = None
+        for _attempt_browsers in [_cookie_browsers, [None]]:
+            # First pass: try with cookies; second pass (fallback): try without
+            for _browser in _attempt_browsers:
+                attempt_opts = dict(sub_opts)
+                if _browser:
+                    attempt_opts["cookiesfrombrowser"] = (_browser,)
+                try:
+                    with ytdl.YoutubeDL(attempt_opts) as ydl:
+                        if dl_id in _download_controls:
+                            _download_controls[dl_id]["ydl_ref"] = ydl
+                        info = ydl.extract_info(item["url"], download=True)
+                        if dl_id in _download_controls:
+                            _download_controls[dl_id]["ydl_ref"] = None
+                    last_exc = None
+                    break  # success — stop trying browsers
+                except Exception as exc:
+                    last_exc = exc
+                    if dl_id in _download_controls:
+                        _download_controls[dl_id]["ydl_ref"] = None
+                    continue  # try next browser
+            if last_exc is None:
+                break  # outer loop: success
+        if last_exc is not None:
+            raise last_exc  # all browsers + no-cookie fallback failed
+        # Find the subtitle file yt-dlp just wrote — only files newer than when we started
         candidates = sorted(
-            [f for f in dl_dir.iterdir() if f.suffix.lower() in sub_exts],
+            [f for f in dl_dir.iterdir()
+             if f.suffix.lower() in sub_exts and f.stat().st_mtime >= download_started_at],
             key=lambda f: f.stat().st_mtime,
             reverse=True,
         )
         if candidates:
             _downloads[dl_id]["file_path"] = str(candidates[0])
-        elif info:
-            _downloads[dl_id]["file_path"] = ydl.prepare_filename(info)
+        else:
+            # No subtitle file written — video likely has no subtitles in this language
+            raise RuntimeError(
+                f"No subtitle found for language '{subtitle_lang}'. "
+                "Check that the video has subtitles, or try a different language code (e.g. 'en', 'ar', 'fr')."
+            )
         return
 
     # ── Format selector ───────────────────────────────────────────────────────
