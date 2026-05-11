@@ -18,6 +18,7 @@ export interface StartDownloadParams {
   quality:          string;
   audioFormat:      string;
   subtitleLang:     string;
+  subtitleFormat:   string;
   thumbnailFormat:  string;
   trimStart:        number;
   trimEnd:          number;
@@ -173,7 +174,7 @@ export function useDownloaderQueue() {
   const startDownload = async (p: StartDownloadParams) => {
     const effectiveEngine: DownloadEngine =
       p.fileType === "thumbnail" || p.fileType === "subtitle" ? "standard" : p.downloadEngine;
-    const variantLabel = variantLabelForRequest(p.fileType, p.quality, p.audioFormat, p.subtitleLang, p.thumbnailFormat);
+    const variantLabel = variantLabelForRequest(p.fileType, p.quality, p.audioFormat, p.subtitleLang, p.thumbnailFormat, p.subtitleFormat);
     const taskId = uid();
 
     const newItem: QueueItem = {
@@ -191,7 +192,7 @@ export function useDownloaderQueue() {
       const trimEnabled = p.trimOpen && p.trimEnd - p.trimStart < p.info.duration;
       const forceHls    = p.url.toLowerCase().includes(".m3u8");
       p.onDownloadStarting?.();
-      const qs = `url=${encodeURIComponent(p.url)}&title=${encodeURIComponent(p.info.title)}&thumbnail=${encodeURIComponent(p.info.thumbnail)}&dl_type=${p.fileType}&quality=${p.quality}&audio_format=${p.audioFormat}&subtitle_lang=${p.subtitleLang}&thumbnail_format=${p.thumbnailFormat}&trim_start=${p.trimStart}&trim_end=${p.trimEnd}&trim_enabled=${trimEnabled}&use_cpu=${p.useCpu}&download_engine=${encodeURIComponent(effectiveEngine)}${forceHls ? "&force_hls=true" : ""}`;
+      const qs = `url=${encodeURIComponent(p.url)}&title=${encodeURIComponent(p.info.title)}&thumbnail=${encodeURIComponent(p.info.thumbnail)}&dl_type=${p.fileType}&quality=${p.quality}&audio_format=${p.audioFormat}&subtitle_lang=${p.subtitleLang}&subtitle_format=${p.subtitleFormat}&thumbnail_format=${p.thumbnailFormat}&trim_start=${p.trimStart}&trim_end=${p.trimEnd}&trim_enabled=${trimEnabled}&use_cpu=${p.useCpu}&download_engine=${encodeURIComponent(effectiveEngine)}${forceHls ? "&force_hls=true" : ""}`;
       const res = await backendFetch(`${API}/download?${qs}`, undefined, { sensitive: true });
       if (!res.ok) {
         let msg = `Download failed (${res.status})`;
@@ -215,7 +216,7 @@ export function useDownloaderQueue() {
     for (const bUrl of urls) {
       const effectiveEngine: DownloadEngine =
         p.fileType === "thumbnail" || p.fileType === "subtitle" ? "standard" : p.downloadEngine;
-      const variantLabel = variantLabelForRequest(p.fileType, p.quality, p.audioFormat, p.subtitleLang, p.thumbnailFormat);
+      const variantLabel = variantLabelForRequest(p.fileType, p.quality, p.audioFormat, p.subtitleLang, p.thumbnailFormat, p.subtitleFormat);
       const taskId = uid();
       const newItem: QueueItem = {
         id: taskId, serverId: "", url: bUrl,
@@ -237,7 +238,7 @@ export function useDownloaderQueue() {
         // of whether the trim range made sense for that media's actual duration.
         // Safest fix: always disable trim in batch mode. Users who need trimmed
         // downloads should queue them individually via startDownload.
-        const qs = `url=${encodeURIComponent(bUrl)}&dl_type=${p.fileType}&quality=${p.quality}&audio_format=${p.audioFormat}&subtitle_lang=${p.subtitleLang}&thumbnail_format=${p.thumbnailFormat}&trim_start=${p.trimStart}&trim_end=${p.trimEnd}&trim_enabled=false&use_cpu=${p.useCpu}&download_engine=${encodeURIComponent(effectiveEngine)}${forceHls ? "&force_hls=true" : ""}`;
+        const qs = `url=${encodeURIComponent(bUrl)}&dl_type=${p.fileType}&quality=${p.quality}&audio_format=${p.audioFormat}&subtitle_lang=${p.subtitleLang}&subtitle_format=${p.subtitleFormat}&thumbnail_format=${p.thumbnailFormat}&trim_start=${p.trimStart}&trim_end=${p.trimEnd}&trim_enabled=false&use_cpu=${p.useCpu}&download_engine=${encodeURIComponent(effectiveEngine)}${forceHls ? "&force_hls=true" : ""}`;
         const res = await backendFetch(`${API}/download?${qs}`, undefined, { sensitive: true });
         if (!res.ok) throw new Error(`Download request failed with ${res.status}`);
         const data = await res.json();

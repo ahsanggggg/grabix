@@ -134,10 +134,11 @@ export function variantLabelForRequest(
   audioFormat: string,
   subtitleLang: string,
   thumbnailFormat: string,
+  subtitleFormat: string = "srt",
 ): string {
   if (fileType === "video")    return quality;
   if (fileType === "audio")    return `${audioFormat}-192`;
-  if (fileType === "subtitle") return `${subtitleLang}-subtitle`;
+  if (fileType === "subtitle") return `${subtitleLang}-${subtitleFormat}`;
   return thumbnailFormat;
 }
 

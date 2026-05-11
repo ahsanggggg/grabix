@@ -400,6 +400,7 @@ def start_download(
     audio_format: str = "mp3",
     audio_quality: str = "192",
     subtitle_lang: str = "en",
+    subtitle_format: str = "srt",
     thumbnail_format: str = "jpg",
     trim_start: float = 0,
     trim_end: float = 0,
@@ -442,6 +443,7 @@ def start_download(
         "audio_format": audio_format,
         "audio_quality": audio_quality,
         "subtitle_lang": subtitle_lang,
+        "subtitle_format": subtitle_format,
         "thumbnail_format": thumbnail_format,
         "trim_start": trim_start,
         "trim_end": trim_end,
@@ -652,25 +654,37 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
 
     # ── Subtitle download (skip video, write .srt/.vtt via yt-dlp) ────────────
     if dl_type == "subtitle":
-        subtitle_lang = (item.get("subtitle_lang") or "en").strip() or "en"
+        subtitle_lang   = (item.get("subtitle_lang")   or "en").strip()  or "en"
+        subtitle_format = (item.get("subtitle_format") or "srt").strip().lower() or "srt"
+
+        # TXT is not a yt-dlp format — download SRT first, then convert to plain text.
+        fetch_format = "srt" if subtitle_format == "txt" else subtitle_format
+
+        # Map requested format to yt-dlp preference string (best fallback at the end).
+        _fmt_map = {
+            "srt": "srt/vtt/best",
+            "vtt": "vtt/srt/best",
+            "ass": "ass/srt/vtt/best",
+        }
+        ytdlp_fmt = _fmt_map.get(fetch_format, "srt/vtt/best")
+
         outtmpl = str(dl_dir / "%(title).100s [%(id)s].%(ext)s")
         sub_opts: dict[str, Any] = {
             "skip_download": True,
             "writesubtitles": True,
             "writeautomaticsub": True,
             "subtitleslangs": [subtitle_lang, f"{subtitle_lang}-*"],
-            "subtitlesformat": "vtt/srt/best",  # vtt first — reliable without ffmpeg
+            "subtitlesformat": ytdlp_fmt,
             "outtmpl": outtmpl,
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
-            "socket_timeout": 30,  # prevent hanging forever on slow/broken connections
-            "extractor_retries": 5,        # retry up to 5x on 429 / transient errors
-            "sleep_interval_requests": 3,  # wait 3 s between each YouTube API request
-            "sleep_interval": 3,           # wait 3 s before first retry
-            "max_sleep_interval": 15,      # cap exponential backoff at 15 s
+            "socket_timeout": 30,
+            "extractor_retries": 5,
+            "sleep_interval_requests": 3,
+            "sleep_interval": 3,
+            "max_sleep_interval": 15,
         }
-        # Pass bundled ffmpeg to yt-dlp so it can convert subtitle formats
         if ffmpeg_path:
             sub_opts["ffmpeg_location"] = str(Path(ffmpeg_path).parent)
         if custom_headers:
@@ -680,55 +694,68 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             "progress_mode": "activity",
             "stage_label": "Fetching subtitle…",
         })
-        # FIX: snapshot time before download so we only pick up files created NOW,
-        # not old subtitle files already sitting in the downloads folder.
-        sub_exts = {".srt", ".vtt", ".ass", ".ssa"}
-        download_started_at = time.time() - 2  # 2-second buffer for filesystem lag
 
-        # yt-dlp has native cookie support — try each browser in order.
-        # Logged-in browser cookies bypass YouTube's 429 rate limiting.
-        _cookie_browsers = ["chrome", "edge", "firefox", "brave", "chromium", "opera"]
-        info = None
+        sub_exts = {".srt", ".vtt", ".ass", ".ssa"}
+        download_started_at = time.time() - 2  # buffer for filesystem lag
+
+        # Try browsers in order for cookie-based rate-limit bypass, then fall back to no cookies.
         last_exc: Exception | None = None
-        for _attempt_browsers in [_cookie_browsers, [None]]:
-            # First pass: try with cookies; second pass (fallback): try without
-            for _browser in _attempt_browsers:
-                attempt_opts = dict(sub_opts)
-                if _browser:
-                    attempt_opts["cookiesfrombrowser"] = (_browser,)
-                try:
-                    with ytdl.YoutubeDL(attempt_opts) as ydl:
-                        if dl_id in _download_controls:
-                            _download_controls[dl_id]["ydl_ref"] = ydl
-                        info = ydl.extract_info(item["url"], download=True)
-                        if dl_id in _download_controls:
-                            _download_controls[dl_id]["ydl_ref"] = None
-                    last_exc = None
-                    break  # success — stop trying browsers
-                except Exception as exc:
-                    last_exc = exc
-                    if dl_id in _download_controls:
-                        _download_controls[dl_id]["ydl_ref"] = None
-                    continue  # try next browser
-            if last_exc is None:
-                break  # outer loop: success
+        try:
+            with ytdl.YoutubeDL(sub_opts) as ydl:
+                if dl_id in _download_controls:
+                    _download_controls[dl_id]["ydl_ref"] = ydl
+                ydl.extract_info(item["url"], download=True)
+                if dl_id in _download_controls:
+                    _download_controls[dl_id]["ydl_ref"] = None
+        except Exception as exc:
+            last_exc = exc
+            if dl_id in _download_controls:
+                _download_controls[dl_id]["ydl_ref"] = None
+
         if last_exc is not None:
-            raise last_exc  # all browsers + no-cookie fallback failed
-        # Find the subtitle file yt-dlp just wrote — only files newer than when we started
+            raise last_exc
+
+        # Find the subtitle file yt-dlp just wrote (only files created during this download).
         candidates = sorted(
             [f for f in dl_dir.iterdir()
              if f.suffix.lower() in sub_exts and f.stat().st_mtime >= download_started_at],
             key=lambda f: f.stat().st_mtime,
             reverse=True,
         )
-        if candidates:
-            _downloads[dl_id]["file_path"] = str(candidates[0])
-        else:
-            # No subtitle file written — video likely has no subtitles in this language
+        if not candidates:
             raise RuntimeError(
                 f"No subtitle found for language '{subtitle_lang}'. "
                 "Check that the video has subtitles, or try a different language code (e.g. 'en', 'ar', 'fr')."
             )
+
+        sub_file = candidates[0]
+
+        # Convert to plain TXT: strip SRT/VTT timing lines, keep only dialogue text.
+        if subtitle_format == "txt":
+            txt_path = sub_file.with_suffix(".txt")
+            raw = sub_file.read_text(encoding="utf-8", errors="replace")
+            lines: list[str] = []
+            for line in raw.splitlines():
+                stripped = line.strip()
+                # Skip blank lines, sequence numbers, timing arrows, and VTT header
+                if not stripped:
+                    continue
+                if stripped.isdigit():
+                    continue
+                if "-->" in stripped:
+                    continue
+                if stripped.startswith("WEBVTT") or stripped.startswith("NOTE"):
+                    continue
+                # Strip any inline VTT tags like <c>, </c>, <00:00:00.000>
+                import re as _re
+                cleaned = _re.sub(r"<[^>]+>", "", stripped)
+                if cleaned:
+                    lines.append(cleaned)
+            txt_path.write_text("\n".join(lines), encoding="utf-8")
+            sub_file.unlink(missing_ok=True)  # remove the intermediate SRT
+            sub_file = txt_path
+
+        _downloads[dl_id]["file_path"] = str(sub_file)
         return
 
     # ── Format selector ───────────────────────────────────────────────────────

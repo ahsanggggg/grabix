@@ -22,6 +22,8 @@ interface DownloaderPreviewProps {
   setAudioFormat:    (f: string) => void;
   subtitleLang:      string;
   setSubtitleLang:   (l: string) => void;
+  subtitleFormat:    string;
+  setSubtitleFormat: (f: string) => void;
   thumbnailFormat:   string;
   setThumbnailFormat:(f: string) => void;
   trimStart:         number;
@@ -163,6 +165,28 @@ export function DownloaderPreview(p: DownloaderPreviewProps) {
         </div>
       )}
 
+      {/* Subtitle format */}
+      {p.fileType === "subtitle" && (
+        <div style={{ marginBottom: 14 }} className="fade-in">
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", marginBottom: 8, letterSpacing: 0.5, textTransform: "uppercase" }}>Subtitle Format</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {([
+              { id: "srt", label: "SRT", desc: "Most compatible — works in VLC, MX Player, everything" },
+              { id: "vtt", label: "VTT", desc: "Web standard — used by browsers and YouTube" },
+              { id: "ass", label: "ASS", desc: "Advanced styling — best for anime with effects" },
+              { id: "txt", label: "TXT", desc: "Plain text only — just the dialogue, no timing" },
+            ] as const).map(({ id, label, desc }) => (
+              <div key={id} className="tooltip-wrap">
+                <button className={`quality-chip${p.subtitleFormat === id ? " active" : ""}`} onClick={() => p.setSubtitleFormat(id)}>
+                  {label}
+                </button>
+                <span className="tooltip-box" style={{ width: 200, whiteSpace: "normal", lineHeight: 1.5 }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Thumbnail format */}
       {p.fileType === "thumbnail" && (
         <div style={{ marginBottom: 14 }} className="fade-in">
@@ -216,7 +240,7 @@ export function DownloaderPreview(p: DownloaderPreviewProps) {
           {p.fileType === "video"     && `Saves as MP4 · ${p.quality}`}
           {p.fileType === "audio"     && `Saves as ${p.audioFormat.toUpperCase()} · 192kbps`}
           {p.fileType === "thumbnail" && `Saves as ${p.thumbnailFormat.toUpperCase()}`}
-          {p.fileType === "subtitle"  && `Saves as available subtitle · ${p.subtitleLang.toUpperCase()}`}
+          {p.fileType === "subtitle"  && `Saves as .${p.subtitleFormat.toUpperCase()} · ${p.subtitleLang.toUpperCase()}`}
         </div>
       </div>
     </div>

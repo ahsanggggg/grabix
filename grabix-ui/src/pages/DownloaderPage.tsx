@@ -37,6 +37,7 @@ export default function DownloaderPage({ onDownloadStarting }: { onDownloadStart
   const [dependencies,    setDependencies]    = useState<Record<string, RuntimeDependency>>({});
   const [audioFormat,     setAudioFormat]     = useState("mp3");
   const [subtitleLang,    setSubtitleLang]    = useState("en");
+  const [subtitleFormat,  setSubtitleFormat]  = useState("srt");
   const [thumbnailFormat, setThumbnailFormat] = useState("jpg");
   const [trimStart,       setTrimStart]       = useState(0);
   const [trimEnd,         setTrimEnd]         = useState(0);
@@ -153,7 +154,7 @@ export default function DownloaderPage({ onDownloadStarting }: { onDownloadStart
     (d) => !d.available || d.job?.status === "installing" || d.job?.status === "failed"
   );
   const activeCount = queue.filter((q) => q.status === "downloading" || q.status === "queued" || q.status === "processing").length;
-  const sharedDownloadParams = { fileType, quality, audioFormat, subtitleLang, thumbnailFormat, downloadEngine, trimStart, trimEnd, trimOpen, useCpu, onDownloadStarting };
+  const sharedDownloadParams = { fileType, quality, audioFormat, subtitleLang, subtitleFormat, thumbnailFormat, downloadEngine, trimStart, trimEnd, trimOpen, useCpu, onDownloadStarting };
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -257,6 +258,7 @@ export default function DownloaderPage({ onDownloadStarting }: { onDownloadStart
             aria2Available={aria2Available}
             audioFormat={audioFormat} setAudioFormat={setAudioFormat}
             subtitleLang={subtitleLang} setSubtitleLang={setSubtitleLang}
+            subtitleFormat={subtitleFormat} setSubtitleFormat={setSubtitleFormat}
             thumbnailFormat={thumbnailFormat} setThumbnailFormat={setThumbnailFormat}
             trimStart={trimStart} trimEnd={trimEnd} setTrimStart={setTrimStart} setTrimEnd={setTrimEnd}
             trimOpen={trimOpen} setTrimOpen={setTrimOpen}
