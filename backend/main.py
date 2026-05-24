@@ -40,6 +40,13 @@ from downloads.engine import (
     _start_download_thread,
 )
 
+# FIX (Bug 2 — Problem B): Import the engine MODULE, not just the function.
+# `from downloads.engine import _start_download_thread` captures the value at
+# import time, which may be None if _register_download_handlers() hasn't run
+# yet. Using the module reference lets the lambda below dereference it at
+# call-time, always getting the live post-registration function.
+import downloads.engine as _downloads_engine
+
 # ── Service imports ───────────────────────────────────────────────────────────
 from app.services.errors import json_error_response
 from app.services.logging_utils import LOG_DIR, backend_log_path, get_logger, log_event, read_recent_log_events
@@ -141,6 +148,7 @@ def _is_internal_managed_file(path) -> bool:
     p = _Path(path)
     if p.suffix.lower() in _INTERNAL_FILE_SUFFIXES:
         return True
+    # Also skip any file whose name starts with a dot (hidden/temp files)
     if p.name.startswith("."):
         return True
     return False
@@ -160,8 +168,23 @@ download_helpers.init(
     downloads, download_controls,
     db_update_status=db_update_status,
     persist_download_record=_persist_download_record,
-    start_download_thread=_start_download_thread,
+    # FIX (Bug 2 — Problem B): lambda defers lookup to call-time so we always
+    # get the live function even if _register_download_handlers() reassigns
+    # _downloads_engine._start_download_thread after this module is imported.
+    start_download_thread=lambda dl_id: _downloads_engine._start_download_thread(dl_id),
 )
+
+# FIX (downloads stuck "Queued" in EXE — root cause #1):
+# downloads/engine.py holds its OWN private _downloads / _download_controls
+# dicts (initialised to {} at module load). main.py creates a separate
+# RuntimeStateRegistry and binds `downloads` / `download_controls` to THOSE
+# dicts. Without this init() call the two sides of the app were talking to
+# completely different dicts: start_download() stored the record into engine's
+# private dict but list_downloads() / the SSE stream read from the registry
+# dict — so the UI always saw an empty queue and nothing ever started.
+# engine.init() replaces the engine's private references with the same objects
+# that main.py, download_helpers, and network_monitor already share.
+_downloads_engine.init(downloads, download_controls)
 
 # ── Loggers ───────────────────────────────────────────────────────────────────
 backend_logger = get_logger("backend")
@@ -538,8 +561,19 @@ def run_server() -> None:
     import sys as _sys
 
     _register_download_handlers()
-    ensure_runtime_bootstrap()
-    recover_download_jobs()
+
+    # FIX (Bug 2 — Problem A): Removed the two premature calls that were here:
+    #   ensure_runtime_bootstrap()
+    #   recover_download_jobs()
+    #
+    # Both functions are now called exclusively inside _grabix_lifespan, where
+    # the asyncio event loop is already running. Calling them here — before
+    # loop.run_until_complete() — meant the event loop didn't exist yet, so any
+    # coroutines or asyncio.create_task() calls inside them were silently
+    # dropped. Download threads started by that broken first call were orphaned,
+    # and when the lifespan called the same functions a second time it couldn't
+    # tell recovered jobs from new ones. Net result: every download stayed
+    # permanently "queued" with no thread ever pulling it.
 
     port = backend_port()
 
@@ -549,16 +583,16 @@ def run_server() -> None:
         _probe.bind(("127.0.0.1", port))
         _probe.close()
     except OSError:
-        _sys.stderr.write(
-            f"\n ==========================================\n"
-            f"   GRABIX Backend — STARTUP FAILED\n"
-            f"   Port {port} is already in use.\n"
-            f"   Another GRABIX backend is already running.\n"
-            f"   Close it (or its terminal window) first,\n"
-            f"   then restart.\n"
-            f" ==========================================\n\n"
+        # FIX (RC2): Raise a catchable RuntimeError instead of calling sys.exit(1).
+        # sys.exit() raises SystemExit which PyO3 cannot recover from — it permanently
+        # kills the embedded interpreter. RuntimeError is caught by the Rust restart
+        # loop in lib.rs, which waits 8 seconds for the OS to release the port, then
+        # retries. This makes port conflicts on crash/restart fully self-healing.
+        raise RuntimeError(
+            f"port_in_use: Port {port} is already in use. "
+            f"Another GRABIX backend is still running (or the OS has not yet released "
+            f"the port after a crash). The backend will retry automatically."
         )
-        _sys.exit(1)
 
     loop = asyncio.SelectorEventLoop() if os.name == "nt" else asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
