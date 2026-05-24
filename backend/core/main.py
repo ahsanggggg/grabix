@@ -471,17 +471,16 @@ def check_link(url: str):
         safe_url = validate_outbound_target(safe_url, mode="public_user_target").normalized_url
         if _is_direct_media_url(safe_url) or _is_direct_subtitle_url(safe_url):
             return _direct_preview_payload(safe_url)
-        ydl_mod = _get_yt_dlp()
-        with ydl_mod.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(safe_url, download=False)
-            return {
-                "valid": True,
-                "title": info.get("title", "Unknown"),
-                "thumbnail": info.get("thumbnail", ""),
-                "duration_seconds": info.get("duration", 0),
-                "uploader": info.get("channel") or info.get("uploader", ""),
-                "formats": _get_formats(info),
-            }
+        from app.services.ytdlp_helpers import extract_info_with_cookies
+        info = extract_info_with_cookies(opts, safe_url)
+        return {
+            "valid": True,
+            "title": info.get("title", "Unknown"),
+            "thumbnail": info.get("thumbnail", ""),
+            "duration_seconds": info.get("duration", 0),
+            "uploader": info.get("channel") or info.get("uploader", ""),
+            "formats": _get_formats(info),
+        }
     except OSError as e:
         if getattr(e, "errno", None) == 22:
             return {"valid": False, "error": "That link could not be read. Paste a full http or https media URL."}

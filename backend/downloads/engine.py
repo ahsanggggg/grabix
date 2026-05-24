@@ -633,6 +633,84 @@ class _CancelledError(Exception):
 
 # ── yt-dlp download ───────────────────────────────────────────────────────────
 
+# Browsers tried in order when YouTube demands a sign-in / bot check.
+# yt-dlp reads the real browser's cookie store — no manual export needed.
+def _is_bot_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(kw in msg for kw in (
+        "sign in to confirm", "bot", "use --cookies",
+        "cookies-from-browser", "authentication required",
+    ))
+
+
+def _is_youtube_url(url: str) -> bool:
+    u = url.lower()
+    return "youtube.com" in u or "youtu.be" in u
+
+
+_YT_PLAYER_CLIENTS = [
+    ["ios"],
+    ["android"],
+    ["tv_embedded"],
+    ["android_music"],
+    ["mweb"],
+    ["web_creator"],
+]
+
+_BROWSERS = ["chrome", "firefox", "edge", "brave", "chromium"]
+
+
+def _ytdlp_with_cookie_fallback(opts: dict, url: str, dl_id: str) -> Any:
+    """
+    Run a yt-dlp download handling YouTube bot detection automatically.
+
+    Tries multiple YouTube player clients (ios, android, tv_embedded…) then
+    browser cookie stores. Raises YOUTUBE_LOGIN_NEEDED only if all fail.
+    """
+    import yt_dlp as ytdl
+
+    def _run(run_opts: dict):
+        with ytdl.YoutubeDL(run_opts) as ydl:
+            if dl_id in _download_controls:
+                _download_controls[dl_id]["ydl_ref"] = ydl
+            result = ydl.extract_info(url, download=True)
+            if dl_id in _download_controls:
+                _download_controls[dl_id]["ydl_ref"] = None
+            return result
+
+    def _cleanup():
+        if dl_id in _download_controls:
+            _download_controls[dl_id]["ydl_ref"] = None
+
+    if not _is_youtube_url(url):
+        return _run(opts)
+
+    # ── Step 1: player clients ────────────────────────────────────────────────
+    for clients in _YT_PLAYER_CLIENTS:
+        try:
+            client_opts = dict(opts)
+            client_opts["extractor_args"] = {"youtube": {"player_client": clients}}
+            return _run(client_opts)
+        except Exception as exc:
+            _cleanup()
+            if not _is_bot_error(exc):
+                raise
+            logger.debug("Download player_client=%s blocked: %s", clients, exc)
+
+    # ── Step 2: browser cookies ───────────────────────────────────────────────
+    for browser in _BROWSERS:
+        try:
+            browser_opts = dict(opts)
+            browser_opts["cookiesfrombrowser"] = (browser,)
+            return _run(browser_opts)
+        except Exception as exc:
+            _cleanup()
+            logger.debug("Download browser %s: %s", browser, exc)
+            continue
+
+    raise RuntimeError("YOUTUBE_LOGIN_NEEDED")
+
+
 def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: threading.Event) -> None:
     try:
         import yt_dlp as ytdl
@@ -698,22 +776,8 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
         sub_exts = {".srt", ".vtt", ".ass", ".ssa"}
         download_started_at = time.time() - 2  # buffer for filesystem lag
 
-        # Try browsers in order for cookie-based rate-limit bypass, then fall back to no cookies.
-        last_exc: Exception | None = None
-        try:
-            with ytdl.YoutubeDL(sub_opts) as ydl:
-                if dl_id in _download_controls:
-                    _download_controls[dl_id]["ydl_ref"] = ydl
-                ydl.extract_info(item["url"], download=True)
-                if dl_id in _download_controls:
-                    _download_controls[dl_id]["ydl_ref"] = None
-        except Exception as exc:
-            last_exc = exc
-            if dl_id in _download_controls:
-                _download_controls[dl_id]["ydl_ref"] = None
-
-        if last_exc is not None:
-            raise last_exc
+        # Use cookie fallback: tries no-cookies first, then each browser if YouTube blocks.
+        _ytdlp_with_cookie_fallback(sub_opts, item["url"], dl_id)
 
         # Find the subtitle file yt-dlp just wrote (only files created during this download).
         candidates = sorted(
@@ -908,12 +972,8 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
             "ffmpeg_i": ["-ss", str(trim_start), "-to", str(trim_end)],
         }
 
-    with ytdl.YoutubeDL(opts) as ydl:
-        # Store the ydl object so psutil can find and suspend its subprocess if needed
-        if dl_id in _download_controls:
-            _download_controls[dl_id]["ydl_ref"] = ydl
-        info = ydl.extract_info(item["url"], download=True)
-        if info:
+    info = _ytdlp_with_cookie_fallback(opts, item["url"], dl_id)
+    if info:
             # _postprocessor_hook may have already set file_path to the correct
             # final output (e.g. .mp3 after FFmpegExtractAudio). Trust it if the
             # file actually exists on disk — only fall back to requested_downloads
@@ -945,8 +1005,6 @@ def _run_ytdlp(dl_id: str, item: dict, pause_ev: threading.Event, cancel_ev: thr
                     })
                 except Exception:
                     pass
-        if dl_id in _download_controls:
-            _download_controls[dl_id]["ydl_ref"] = None
 
 
 # ── aria2c download ───────────────────────────────────────────────────────────

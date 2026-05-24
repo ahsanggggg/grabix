@@ -286,8 +286,8 @@ def ytdlp_extract_full(url: str) -> dict:
         "socket_timeout": 20,
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    from app.services.ytdlp_helpers import extract_info_with_cookies
+    info = extract_info_with_cookies(ydl_opts, url)
 
     if not info:
         raise RuntimeError("yt-dlp returned no info for this URL")

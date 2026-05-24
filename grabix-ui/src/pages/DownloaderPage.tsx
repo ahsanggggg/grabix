@@ -20,6 +20,35 @@ import { QueueCard } from "./QueueCard";
 
 const API = BACKEND_API;
 
+function UpdateYtDlpButton({ onDone }: { onDone: () => void }) {
+  const [secs, setSecs] = useState<number | null>(null);
+
+  const start = async () => {
+    try {
+      await backendFetch(`${API}/runtime/dependencies/install?dep_id=yt-dlp`, { method: "POST" });
+    } catch { /* fire and forget — backend handles it */ }
+    let remaining = 35;
+    setSecs(remaining);
+    const iv = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) { clearInterval(iv); setSecs(null); onDone(); }
+      else setSecs(remaining);
+    }, 1000);
+  };
+
+  if (secs !== null) return (
+    <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+      ⏳ Updating yt-dlp… <strong style={{ color: "var(--text-primary)" }}>{secs}s</strong> — input will unlock when done.
+    </span>
+  );
+
+  return (
+    <button onClick={start} style={{ padding: "6px 14px", borderRadius: "var(--radius-sm)", background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+      Update yt-dlp automatically
+    </button>
+  );
+}
+
 export default function DownloaderPage({ onDownloadStarting }: { onDownloadStarting?: () => void }) {
   useRuntimeHealth();
 
@@ -76,10 +105,12 @@ export default function DownloaderPage({ onDownloadStarting }: { onDownloadStart
     return () => { active = false; clearInterval(depInterval); };
   }, []);
 
+  const [showCookieHelp,  setShowCookieHelp]  = useState(false);
+
   // ── fetchInfo ─────────────────────────────────────────────────────────────────
   const fetchInfo = useCallback(async (inputUrl: string) => {
     if (!inputUrl.trim()) return;
-    setStatus("loading"); setInfo(null); setErrMsg("");
+    setStatus("loading"); setInfo(null); setErrMsg(""); setShowCookieHelp(false);
     const isReady = await waitForBackendCoreReady(30000, 500);
     if (!isReady) {
       setErrMsg("Backend is still starting up. Please wait a moment and try again.");
@@ -96,7 +127,14 @@ export default function DownloaderPage({ onDownloadStarting }: { onDownloadStart
         };
         setInfo(parsed); setTrimStart(0); setTrimEnd(parsed.duration); setStatus("ok");
       } else {
-        setErrMsg(data.error || "Could not fetch link."); setStatus("error");
+        const errStr: string = data.error || "Could not fetch link.";
+        if (errStr.includes("YOUTUBE_LOGIN_NEEDED")) {
+          setShowCookieHelp(true);
+          setErrMsg("YouTube blocked this request. Open YouTube in Chrome and make sure you're logged in, then try again.");
+        } else {
+          setErrMsg(errStr);
+        }
+        setStatus("error");
       }
     } catch {
       setErrMsg("Could not reach the backend. Make sure the app is running and try again.");
@@ -243,6 +281,14 @@ export default function DownloaderPage({ onDownloadStarting }: { onDownloadStart
               {status === "error" && (
                 <div className="fade-in" style={{ marginTop: 10, padding: "10px 14px", borderRadius: "var(--radius-sm)", background: "var(--bg-surface2)", border: "1px solid var(--danger)", display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-danger)" }}>
                   <IconAlert size={15} />{errMsg}
+                </div>
+              )}
+              {showCookieHelp && (
+                <div className="fade-in" style={{ marginTop: 8, padding: "12px 14px", borderRadius: "var(--radius-sm)", background: "var(--bg-surface2)", border: "1px solid var(--warning, #f59e0b)", fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                  <div style={{ marginBottom: 8, color: "var(--text-primary)", fontWeight: 500 }}>
+                    YouTube is blocking this request — your yt-dlp version may be outdated.
+                  </div>
+                  <UpdateYtDlpButton onDone={() => { setShowCookieHelp(false); setStatus("idle"); setErrMsg(""); }} />
                 </div>
               )}
             </div>
