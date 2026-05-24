@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from db_helpers import load_settings, save_settings_to_disk
+from app.services.db_helpers import load_settings, save_settings_to_disk
 from app.services.adblock_service import get_status, force_refresh
 
 router = APIRouter()

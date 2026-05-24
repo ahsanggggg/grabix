@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import downloads.engine as _engine
-from library_helpers import _build_library_index, _reconcile_library_state
+from app.services.library_helpers import _build_library_index, _reconcile_library_state
 
 router = APIRouter()
 logger = logging.getLogger("downloads.routes")

@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.services.logging_utils import log_event
-from db_helpers import (
+from app.services.db_helpers import (
     DOWNLOAD_DIR,
     get_db_connection,
     _format_bytes_int,

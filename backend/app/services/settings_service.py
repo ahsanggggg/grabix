@@ -3,9 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import Request
-
-from app.services.errors import raise_json_http
+from fastapi import HTTPException, Request
 
 try:
     import bcrypt
@@ -44,23 +42,17 @@ def _ensure_unlock_not_throttled(client_key: str) -> None:
     attempts = _normalize_unlock_attempts(client_key)
     if len(attempts) >= ADULT_UNLOCK_MAX_ATTEMPTS:
         retry_after = max(1, int(ADULT_UNLOCK_WINDOW_SECONDS - (time.time() - attempts[0])))
-        raise_json_http(
-            429,
-            f"Too many failed attempts. Try again in {retry_after} seconds.",
-            code="adult_content_rate_limited",
-            service="settings",
-            user_action="Wait for the temporary lockout to expire, then try the password again.",
-            retryable=True,
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed attempts. Try again in {retry_after} seconds.",
         )
 
 
 def _hash_adult_password(password: str) -> str:
     if not BCRYPT_AVAILABLE:
-        raise_json_http(
-            500,
-            "bcrypt is required before configuring the adult-content password.",
-            code="adult_content_bcrypt_unavailable",
-            service="settings",
+        raise HTTPException(
+            status_code=500,
+            detail="bcrypt is required before configuring the adult-content password.",
         )
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -104,11 +96,9 @@ def update_settings_payload(
     try:
         save_settings_to_disk(sanitized)
     except Exception as exc:
-        raise_json_http(
-            500,
-            f"Settings could not be saved: {exc}",
-            code="settings_write_failed",
-            service="settings",
+        raise HTTPException(
+            status_code=500,
+            detail=f"Settings could not be saved: {exc}",
         )
     return settings_public_payload(default_settings, load_settings())
 
@@ -121,12 +111,9 @@ def configure_adult_content_password(
 ) -> dict[str, Any]:
     normalized = str(password or "").strip()
     if len(normalized) < 6:
-        raise_json_http(
-            400,
-            "Password must be at least 6 characters.",
-            code="adult_content_password_too_short",
-            service="settings",
-            retryable=False,
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 6 characters.",
         )
 
     settings = load_settings()
@@ -150,13 +137,9 @@ def unlock_adult_content_password(
     settings = load_settings()
     expected_hash = str(settings.get("adult_password_hash") or "")
     if not expected_hash:
-        raise_json_http(
-            428,
-            "Set an adult-content password first.",
-            code="adult_content_not_configured",
-            service="settings",
-            retryable=False,
-            user_action="Set an adult-content password in Settings before trying to unlock it.",
+        raise HTTPException(
+            status_code=428,
+            detail="Set an adult-content password first.",
         )
 
     client_key = _client_key(request)
@@ -164,13 +147,9 @@ def unlock_adult_content_password(
     if not _verify_adult_password(password or "", expected_hash):
         attempts = _record_unlock_failure(client_key)
         remaining = max(0, ADULT_UNLOCK_MAX_ATTEMPTS - attempts)
-        raise_json_http(
-            403,
-            f"Incorrect password. {remaining} attempt(s) remaining before a temporary lockout.",
-            code="adult_content_password_invalid",
-            service="settings",
-            retryable=True,
-            user_action="Check the password and try again.",
+        raise HTTPException(
+            status_code=403,
+            detail=f"Incorrect password. {remaining} attempt(s) remaining before a temporary lockout.",
         )
 
     adult_unlock_attempts.pop(client_key, None)

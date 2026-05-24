@@ -23,7 +23,7 @@ from app.services.logging_utils import (
 )
 from app.services.runtime_config import default_download_dir, runtime_config_snapshot
 from app.services.security import DEFAULT_APPROVED_MEDIA_HOSTS, redact_for_diagnostics
-from db_helpers import get_db_connection, has_ffmpeg
+from app.services.db_helpers import get_db_connection, has_ffmpeg
 from downloads.engine import (
     _downloads_health,
     _database_health,
@@ -31,7 +31,7 @@ from downloads.engine import (
     list_downloads,
     storage_stats,
 )
-from library_helpers import _build_library_index
+from app.services.library_helpers import _build_library_index
 
 router = APIRouter()
 _backend_logger = get_logger("backend")

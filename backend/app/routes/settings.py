@@ -7,7 +7,7 @@ from app.services.settings_service import (
     unlock_adult_content_password,
     update_settings_payload,
 )
-from db_helpers import DEFAULT_SETTINGS, load_settings, save_settings_to_disk
+from app.services.db_helpers import DEFAULT_SETTINGS, load_settings, save_settings_to_disk
 from app.services.runtime_config import default_download_dir
 
 

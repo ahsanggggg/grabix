@@ -13,7 +13,7 @@ import time
 from fastapi import APIRouter, HTTPException
 
 from app.services.logging_utils import get_logger, log_event
-from db_helpers import get_db_connection
+from app.services.db_helpers import get_db_connection
 
 router = APIRouter()
 _backend_logger = get_logger("backend")

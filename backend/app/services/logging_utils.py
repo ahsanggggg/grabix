@@ -1,11 +1,10 @@
 import json
 import logging
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
-from app.services.runtime_config import logs_dir
-
-LOG_DIR = logs_dir()
+LOG_DIR: Path | None = None  # set by initialize_logging() — not imported from runtime_config
 MAX_LOG_BYTES = 1_000_000
 BACKUP_COUNT = 3
 _CONFIGURED = False
@@ -25,23 +24,24 @@ class JsonLineFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=True, default=str)
 
 
-def initialize_logging() -> None:
-    global _CONFIGURED
+def initialize_logging(logs_dir: Path) -> None:
+    global _CONFIGURED, LOG_DIR
     if _CONFIGURED:
         return
+    LOG_DIR = logs_dir
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-
     _CONFIGURED = True
 
 
 def get_logger(service: str) -> logging.Logger:
-    initialize_logging()
+    _log_dir = LOG_DIR or (Path.home() / "Downloads" / "GRABIX" / "logs")
+    _log_dir.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(f"grabix.{service}")
     logger.setLevel(logging.INFO)
     logger.propagate = False
     if not logger.handlers:
         handler = RotatingFileHandler(
-            LOG_DIR / f"{service}.log",
+            _log_dir / f"{service}.log",
             maxBytes=MAX_LOG_BYTES,
             backupCount=BACKUP_COUNT,
             encoding="utf-8",
@@ -73,14 +73,14 @@ def log_event(
 
 
 def backend_log_path() -> str:
-    initialize_logging()
-    return str((LOG_DIR / "backend.log").resolve())
+    _log_dir = LOG_DIR or (Path.home() / "Downloads" / "GRABIX" / "logs")
+    return str((_log_dir / "backend.log").resolve())
 
 
 def read_recent_log_events(limit: int = 30, levels: set[str] | None = None) -> list[dict[str, Any]]:
-    initialize_logging()
+    _log_dir = LOG_DIR or (Path.home() / "Downloads" / "GRABIX" / "logs")
     events: list[dict[str, Any]] = []
-    for path in sorted(LOG_DIR.glob("*.log")):
+    for path in sorted(_log_dir.glob("*.log")):
         try:
             with path.open("r", encoding="utf-8", errors="replace") as handle:
                 for line in handle:

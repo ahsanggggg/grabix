@@ -35,8 +35,9 @@ if exist "%~dp0backend\venv\Scripts\python.exe" (
 
 set "CONSUMET_API_BASE=http://127.0.0.1:3000"
 set "GRABIX_BACKEND_PORT=8000"
+set "PYTHONPATH=%CD%"
 
-"%PY%" -u main.py
+"%PY%" -u core/main.py
 
 echo.
 echo  ==========================================

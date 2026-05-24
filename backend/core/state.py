@@ -191,7 +191,7 @@ def create_download_job(
     Replaces the _create_download_record() function in main.py.
     """
     import json
-    from db_helpers import _format_bytes   # keep using existing util until utils.py migration
+    from app.services.db_helpers import _format_bytes   # keep using existing util until utils.py migration
     p = params or {}
     estimated_bytes = int(p.get("estimated_total_bytes") or 0)
 

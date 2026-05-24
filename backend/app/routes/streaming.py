@@ -7,7 +7,7 @@ Now imports directly — no registry needed.
 from fastapi import APIRouter, HTTPException, Request
 import asyncio
 
-from streaming_helpers import resolve_embed, stream_proxy, stream_variants, extract_stream
+from app.services.streaming_helpers import resolve_embed, stream_proxy, stream_variants, extract_stream
 import downloads.engine as _dl_engine  # ffmpeg_status lives here after extraction
 
 router = APIRouter()

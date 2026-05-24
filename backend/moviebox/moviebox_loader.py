@@ -21,7 +21,7 @@ import threading
 from datetime import datetime, timezone
 
 from app.services.logging_utils import get_logger, log_event
-from db_helpers import get_db_connection
+from app.services.db_helpers import get_db_connection
 from app.services.runtime_config import public_base_url as _public_base_url
 
 SELF_BASE_URL = _public_base_url()

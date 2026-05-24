@@ -324,3 +324,35 @@ def runtime_config_snapshot() -> dict[str, Any]:
         "desktop_auth_ready": bool(desktop_auth_token()),
         "migration": layout["migration"],
     }
+
+
+# ── Config object (added Phase B3) ───────────────────────────────────────────
+# A single object that satisfies ConfigProtocol.
+# All existing individual functions stay untouched below.
+# Starting from B4, services import get_config() instead of 6 separate functions.
+
+class _GrabixConfig:
+    """Single config object. Satisfies ConfigProtocol from shared/protocols.py."""
+
+    def get_download_dir(self):
+        return default_download_dir()
+
+    def get_db_path(self):
+        return db_path()
+
+    def get_logs_dir(self):
+        return logs_dir()
+
+    def get_settings_path(self):
+        return settings_path()
+
+    def is_packaged_mode(self):
+        return is_packaged_mode()
+
+
+_config_instance = _GrabixConfig()
+
+
+def get_config() -> _GrabixConfig:
+    """Get the global config object. Import this instead of 6 individual functions."""
+    return _config_instance
